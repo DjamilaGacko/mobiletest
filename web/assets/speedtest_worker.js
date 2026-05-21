@@ -44,7 +44,7 @@ let settings = {
 	time_auto: true, // if set to true, tests will take less time on faster connections
 	time_ulGraceTime: 3, //time to wait in seconds before actually measuring ul speed (wait for buffers to fill)
 	time_dlGraceTime: 1.5, //time to wait in seconds before actually measuring dl speed (wait for TCP window to increase)
-	count_ping: 15, // number of pings to perform in ping test
+	count_ping: 25, // number of pings to perform in ping test
 	url_dl: "backend/garbage.php", // path to a large file or garbage.php, used for download test. must be relative to this js file
 	url_ul: "backend/empty.php", // path to an empty file, used for upload test. must be relative to this js file
 	url_ping: "backend/empty.php", // path to an empty file, used for ping test. must be relative to this js file
@@ -631,7 +631,7 @@ function pingTest(done) {
 					if (instspd < ping) ping = instspd; // update ping, if the instant ping is lower
 					if (i === 2) jitter = instjitter;
 					//discard the first jitter measurement because it might be much higher than it should be
-					else jitter = instjitter > jitter ? jitter * 0.3 + instjitter * 0.7 : jitter * 0.8 + instjitter * 0.2; // update jitter, weighted average. spikes in ping values are given more weight.
+					else jitter = instjitter > jitter ? jitter * 0.5 + instjitter * 0.5 : jitter * 0.9 + instjitter * 0.1; // update jitter, weighted average. less volatile than before.
 				}
 				prevInstspd = instspd;
 			}
