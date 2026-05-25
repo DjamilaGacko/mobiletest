@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
   <meta name="description"
-    content="Free and Open Source Speedtest. Run it right now in your browser, or self-host on a PHP, Golang, Rust or Node server. License: LGPL." />
-  <link rel="shortcut icon" href="images/favicon.svg" />
+    content="Yele - Test de Vitesse Internet. Testez votre connexion maintenant." />
+  <link rel="shortcut icon" href="images/logo.png" />
   <script type="text/javascript" src="speedtest.js"></script>
   <script type="text/javascript">
     // Set this to a different URL to load the server list from another location.
@@ -14,16 +14,16 @@
   </script>
   <script type="text/javascript" src="javascript/index.js"></script>
   <link rel="stylesheet" type="text/css" href="styling/index.css" />
-  <title>LibreSpeed - Free and Open Source Speedtest</title>
+  <title>Yele - Test de Vitesse Internet</title>
 </head>
 
 <body>
   <header>
-    <img src="images/logo.svg" alt="LibreSpeed" />
+    <img src="images/logo.png" alt="Yele" class="logo" />
   </header>
   <main>
-    <h1>Free and Open Source Speedtest.</h1>
-    <p class="tagline">No Flash, No Java, No Websockets, No Bullsh*t</p>
+    <h1>Test de Vitesse Internet</h1>
+    <p class="tagline">Mesurez votre connexion en quelques secondes</p>
 
     <div class="server-selector">
       <div class="chosen">
@@ -38,8 +38,8 @@
     </div>
 
     <p id="privacy-warning" class="hidden">
-      by clicking the start button you agree to our privacy policy<br />
-      <a href="#" id="choose-privacy">or choose your privacy options</a>
+      En cliquant sur le bouton de démarrage, vous acceptez notre politique de confidentialité<br />
+      <a href="#" id="choose-privacy">ou consultez nos options de confidentialité</a>
     </p>
     <button class="disabled" id="start-button"></button>
 
@@ -70,82 +70,76 @@
     </div>
 
     <button class="small inverted hidden" id="share-results">
-      Share results
+      Partager les résultats
     </button>
   </main>
   <footer>
-    <p class="source">
-      <a href="https://github.com/librespeed/speedtest">source code</a>
-    </p>
+   
   </footer>
 
   <dialog id="share">
     <div class="close-dialog">
-      <img src="images/close-button.svg" alt="Close" />
+      <img src="images/close-button.svg" alt="Fermer" />
     </div>
-    <img id="results" src="" alt="Test results in graphical form" />
-    <button id="copy-link">Copy link</button>
+    <img id="results" src="" alt="Résultats du test en forme graphique" />
+    <button id="copy-link">Copier le lien</button>
   </dialog>
 
   <dialog id="privacy">
     <div class="close-dialog">
-      <img src="images/close-button.svg" alt="Close" />
+      <img src="images/close-button.svg" alt="Fermer" />
     </div>
     <section>
-      <h1>Privacy Policy</h1>
+      <h1>Politique de Confidentialité</h1>
       <p>
-        This HTML5 speed test server is configured with telemetry enabled.
+        Ce service de test de vitesse Yele est configuré avec la télémétrie activée.
       </p>
 
-      <h2>What data we collect</h2>
+      <h2>Quelles données nous collectons</h2>
       <p>
-        At the end of the test, the following data is collected and stored:
+        À la fin du test, les données suivantes sont collectées et stockées:
       </p>
 
       <ul>
-        <li>Test ID</li>
-        <li>Time of testing</li>
-        <li>Test results (download and upload speed, ping and jitter)</li>
-        <li>IP address</li>
-        <li>ISP information</li>
-        <li>Approximate location (inferred from IP address, not GPS)</li>
-        <li>User agent and browser locale</li>
-        <li>Test log (contains no personal information)</li>
+        <li>ID du test</li>
+        <li>Date et heure du test</li>
+        <li>Résultats du test (vitesse de téléchargement et d'upload, ping et jitter)</li>
+        <li>Adresse IP</li>
+        <li>Informations du fournisseur d'accès (FAI)</li>
+        <li>Localisation approximative (déterminée par l'adresse IP, pas GPS)</li>
+        <li>User agent et langue du navigateur</li>
+        <li>Journal du test (ne contient pas d'informations personnelles)</li>
       </ul>
 
-      <h2>How we use the data</h2>
-      <p>Data collected through this service is used to:</p>
+      <h2>Comment nous utilisons les données</h2>
+      <p>Les données collectées via ce service sont utilisées pour:</p>
 
       <ul>
         <li>
-          Allow sharing of test results (sharable image for forums, etc.)
+          Permettre le partage des résultats du test (image partageable, etc.)
         </li>
         <li>
-          To improve the service offered to you (for instance, to detect
-          problems on our side)
+          Améliorer le service offert (par exemple, détecter les problèmes)
         </li>
       </ul>
 
-      <p>No personal information is disclosed to third parties.</p>
+      <p>Aucune information personnelle n'est divulguée à des tiers.</p>
 
-      <h2>Your consent</h2>
+      <h2>Votre consentement</h2>
       <p>
-        By starting the test, you consent to the terms of this privacy policy.
+        En démarrant le test, vous consentez aux termes de cette politique de confidentialité.
       </p>
 
-      <h2>Data removal</h2>
+      <h2>Suppression des données</h2>
       <p>
-        If you want to have your information deleted, you need to provide
-        either the ID of the test or your IP address. This is the only way to
-        identify your data, without this information we won't be able to
-        comply with your request.
+        Si vous souhaitez faire supprimer vos informations, vous devez fournir soit l'ID du test, soit votre adresse IP. C'est la seule façon d'identifier vos données.
       </p>
       <p>
-        Contact this email address for all deletion requests:
-        <a href="mailto:PUT@YOUR_EMAIL.HERE">TO BE FILLED BY DEVELOPER</a>.
+        Contactez l'adresse email suivante pour toute demande de suppression:
+        <a href="mailto:PUT@YOUR_EMAIL.HERE">À REMPLIR PAR LE DÉVELOPPEUR</a>.
       </p>
     </section>
-    <button id="close-privacy">Close</button>
+    <button id="close-privacy">Fermer</button>
   </dialog>
 </body>
 

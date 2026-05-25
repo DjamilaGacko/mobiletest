@@ -1,7 +1,7 @@
 /**
- * Design by fromScratch Studio - 2022, 2023 (fromscratch.io)
- * Implementation in HTML/CSS/JS by Timendus - 2024 (https://github.com/Timendus)
- *
+ * Yele - Modern Speed Test Interface
+ * Based on LibreSpeed design by fromScratch Studio - 2022, 2023 (fromscratch.io)
+ * 
  * See https://github.com/librespeed/speedtest/issues/585
  */
 

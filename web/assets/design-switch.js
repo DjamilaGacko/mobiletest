@@ -1,5 +1,5 @@
 /**
- * Feature switch for enabling the new LibreSpeed design
+ * Design switcher for Yele - Allows switching between classic and modern designs
  *
  * This script checks for:
  * 1. URL parameter: ?design=new or ?design=old

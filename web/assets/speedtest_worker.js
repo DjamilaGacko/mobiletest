@@ -1,6 +1,6 @@
 /*
-	LibreSpeed - Worker
-	by Federico Dossena
+	Speedtest Worker - Yele powered
+	Originally by LibreSpeed - Federico Dossena
 	https://github.com/librespeed/speedtest/
 	GNU LGPLv3 License
 */

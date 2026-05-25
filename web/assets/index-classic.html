@@ -3,7 +3,7 @@
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, user-scalable=no" />
 <meta charset="UTF-8" />
-<link rel="shortcut icon" href="favicon.ico">
+<link rel="shortcut icon" href="images/logo.png">
 <script type="text/javascript" src="speedtest.js"></script>
 <script type="text/javascript">
 function I(i){return document.getElementById(i);}
@@ -159,10 +159,10 @@ function initUI(){
 		color:#FFFFFF;
 	}
 	#startStopBtn:before{
-		content:"Start";
+		content:"Démarrer";
 	}
 	#startStopBtn.running:before{
-		content:"Abort";
+		content:"Arrêter";
 	}
 	#test{
 		margin-top:2em;
@@ -273,13 +273,14 @@ function initUI(){
 		}
 	}
 </style>
-<title>Yele</title>
+<title>Yele - Test de Vitesse</title>
 </head>
 <body>
 <h1>Yele</h1>
+<p class="tagline">Test de Vitesse Internet</p>
 <div id="testWrapper">
 	<div id="startStopBtn" onclick="startStop()"></div><br/>
-	<a class="privacy" href="#" onclick="I('privacyPolicy').style.display=''">Privacy</a>
+	<a class="privacy" href="#" onclick="I('privacyPolicy').style.display=''">Politique de Confidentialité</a>
 	<div id="test">
 		<div class="testGroup">
 			<div class="testArea2">
@@ -317,46 +318,46 @@ function initUI(){
 			<img src="" id="resultsImg" />
 		</div>
 	</div>
-	<a href="https://github.com/librespeed/speedtest">Source code</a>
+	
 </div>
 <div id="privacyPolicy" style="display:none">
-    <h2>Privacy Policy</h2>
-    <p>This HTML5 Speedtest server is configured with telemetry enabled.</p>
-    <h4>What data we collect</h4>
+    <h2>Politique de Confidentialité</h2>
+    <p>Ce service de test de vitesse Yele est configuré avec la télémétrie activée.</p>
+    <h4>Quelles données nous collectons</h4>
     <p>
-        At the end of the test, the following data is collected and stored:
+        À la fin du test, les données suivantes sont collectées et stockées:
         <ul>
-            <li>Test ID</li>
-            <li>Time of testing</li>
-            <li>Test results (download and upload speed, ping and jitter)</li>
-            <li>IP address</li>
-            <li>ISP information</li>
-            <li>Approximate location (inferred from IP address, not GPS)</li>
-            <li>User agent and browser locale</li>
-            <li>Test log (contains no personal information)</li>
+            <li>ID du test</li>
+            <li>Date et heure du test</li>
+            <li>Résultats du test (vitesse de téléchargement et d'upload, ping et jitter)</li>
+            <li>Adresse IP</li>
+            <li>Informations du fournisseur d'accès (FAI)</li>
+            <li>Localisation approximative (déterminée par l'adresse IP, pas GPS)</li>
+            <li>User agent et langue du navigateur</li>
+            <li>Journal du test (ne contient pas d'informations personnelles)</li>
         </ul>
     </p>
-    <h4>How we use the data</h4>
+    <h4>Comment nous utilisons les données</h4>
     <p>
-        Data collected through this service is used to:
+        Les données collectées via ce service sont utilisées pour:
         <ul>
-            <li>Allow sharing of test results (sharable image for forums, etc.)</li>
-            <li>To improve the service offered to you (for instance, to detect problems on our side)</li>
+            <li>Permettre le partage des résultats du test</li>
+            <li>Améliorer le service offert (par exemple, détecter les problèmes)</li>
         </ul>
-        No personal information is disclosed to third parties.
+        Aucune information personnelle n'est divulguée à des tiers.
     </p>
-    <h4>Your consent</h4>
+    <h4>Votre consentement</h4>
     <p>
-        By starting the test, you consent to the terms of this privacy policy.
+        En démarrant le test, vous consentez aux termes de cette politique de confidentialité.
     </p>
-    <h4>Data removal</h4>
+    <h4>Suppression des données</h4>
     <p>
-        If you want to have your information deleted, you need to provide either the ID of the test or your IP address. This is the only way to identify your data, without this information we won't be able to comply with your request.<br/><br/>
-        Contact this email address for all deletion requests: <a href="mailto:PUT@YOUR_EMAIL.HERE">TO BE FILLED BY DEVELOPER</a>.
+        Si vous souhaitez faire supprimer vos informations, vous devez fournir soit l'ID du test, soit votre adresse IP. C'est la seule façon d'identifier vos données.<br/><br/>
+        Contactez l'adresse email suivante pour toute demande de suppression: <a href="mailto:PUT@YOUR_EMAIL.HERE">À REMPLIR PAR LE DÉVELOPPEUR</a>.
     </p>
     <br/><br/>
     <div class="closePrivacyPolicy">
-        <a class="privacy" href="#" onclick="I('privacyPolicy').style.display='none'">Close</a>
+        <a class="privacy" href="#" onclick="I('privacyPolicy').style.display='none'">Fermer</a>
     </div>
     <br/>
 </div>
