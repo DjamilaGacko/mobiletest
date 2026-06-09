@@ -151,7 +151,21 @@ func Record(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipAddr, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ipAddr := r.Header.Get("X-Forwarded-For")
+	if ipAddr == "" {
+		ipAddr, _, _ = net.SplitHostPort(r.RemoteAddr)
+	} else {
+		// X-Forwarded-For peut contenir plusieurs IPs séparées par virgule, prendre la première
+		if idx := len(ipAddr); idx > 0 {
+			for i, c := range ipAddr {
+				if c == ',' {
+					ipAddr = ipAddr[:i]
+					break
+				}
+			}
+		}
+		ipAddr = strings.TrimSpace(ipAddr)
+	}
 	userAgent := r.UserAgent()
 	language := r.Header.Get("Accept-Language")
 
