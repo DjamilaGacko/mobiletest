@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
@@ -96,6 +97,26 @@ type MapPoint struct {
 	Ping        float64 `json:"ping"`
 	Location    string  `json:"location"`
 	Timestamp   string  `json:"timestamp"`
+}
+
+type HeatPoint struct {
+	Lat       float64 `json:"lat"`
+	Lng       float64 `json:"lng"`
+	Intensity float64 `json:"intensity"` // 0.0 (bad) to 1.0 (excellent)
+	Download  float64 `json:"download"`
+}
+
+type OperatorAdvancedStats struct {
+	Operator    string  `json:"operator"`
+	Count       int     `json:"count"`
+	AvgDownload float64 `json:"avgDownload"`
+	P25Download float64 `json:"p25Download"`
+	P50Download float64 `json:"p50Download"`
+	P75Download float64 `json:"p75Download"`
+	P90Download float64 `json:"p90Download"`
+	AvgUpload   float64 `json:"avgUpload"`
+	AvgPing     float64 `json:"avgPing"`
+	P50Ping     float64 `json:"p50Ping"`
 }
 
 type TimelinePoint struct {
@@ -390,6 +411,112 @@ func (m *MongoDB) FetchTimeline(days int) ([]TimelinePoint, error) {
 		points[i] = TimelinePoint{Date: r.Date, Count: r.Count, AvgDownload: round2(r.AvgDl)}
 	}
 	return points, nil
+}
+
+func (m *MongoDB) FetchHeatmap() ([]HeatPoint, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"latitude":  bson.M{"$ne": 0},
+		"longitude": bson.M{"$ne": 0},
+	}
+	cursor, err := m.collection.Find(ctx, filter,
+		options.Find().SetProjection(bson.M{"latitude": 1, "longitude": 1, "dl": 1}),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var docs []Document
+	if err = cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+
+	// Normalize intensity: 100 Mbps = 1.0
+	points := make([]HeatPoint, 0, len(docs))
+	for _, d := range docs {
+		dl, _ := strconv.ParseFloat(d.Download, 64)
+		intensity := dl / 100.0
+		if intensity > 1 {
+			intensity = 1
+		}
+		points = append(points, HeatPoint{Lat: d.Latitude, Lng: d.Longitude, Intensity: intensity, Download: dl})
+	}
+	return points, nil
+}
+
+func (m *MongoDB) FetchAdvancedStats() ([]OperatorAdvancedStats, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"operator": bson.M{"$ne": ""}}}},
+		{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$operator"},
+			{Key: "downloads", Value: bson.D{{Key: "$push", Value: bson.D{{Key: "$toDouble", Value: "$dl"}}}}},
+			{Key: "uploads", Value: bson.D{{Key: "$push", Value: bson.D{{Key: "$toDouble", Value: "$ul"}}}}},
+			{Key: "pings", Value: bson.D{{Key: "$push", Value: bson.D{{Key: "$toDouble", Value: "$ping"}}}}},
+			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+		}}},
+		{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}},
+	}
+
+	cursor, err := m.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	type rawAgg struct {
+		ID        string    `bson:"_id"`
+		Downloads []float64 `bson:"downloads"`
+		Uploads   []float64 `bson:"uploads"`
+		Pings     []float64 `bson:"pings"`
+		Count     int       `bson:"count"`
+	}
+	var raws []rawAgg
+	if err = cursor.All(ctx, &raws); err != nil {
+		return nil, err
+	}
+
+	pct := func(sorted []float64, p float64) float64 {
+		if len(sorted) == 0 {
+			return 0
+		}
+		idx := int(float64(len(sorted)-1) * p)
+		return round2(sorted[idx])
+	}
+	avg := func(vals []float64) float64 {
+		if len(vals) == 0 {
+			return 0
+		}
+		s := 0.0
+		for _, v := range vals {
+			s += v
+		}
+		return round2(s / float64(len(vals)))
+	}
+
+	result := make([]OperatorAdvancedStats, 0, len(raws))
+	for _, r := range raws {
+		sort.Float64s(r.Downloads)
+		sort.Float64s(r.Pings)
+		result = append(result, OperatorAdvancedStats{
+			Operator:    r.ID,
+			Count:       r.Count,
+			AvgDownload: avg(r.Downloads),
+			P25Download: pct(r.Downloads, 0.25),
+			P50Download: pct(r.Downloads, 0.50),
+			P75Download: pct(r.Downloads, 0.75),
+			P90Download: pct(r.Downloads, 0.90),
+			AvgUpload:   avg(r.Uploads),
+			AvgPing:     avg(r.Pings),
+			P50Ping:     pct(r.Pings, 0.50),
+		})
+	}
+	return result, nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

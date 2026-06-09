@@ -87,6 +87,8 @@ func ListenAndServe(conf *config.Config) error {
 	r.Get(conf.BaseURL+"/api/dashboard/operators", results.DashboardOperators)
 	r.Get(conf.BaseURL+"/api/dashboard/map", results.DashboardMap)
 	r.Get(conf.BaseURL+"/api/dashboard/timeline", results.DashboardTimeline)
+	r.Get(conf.BaseURL+"/api/dashboard/heatmap", results.DashboardHeatmap)
+	r.Get(conf.BaseURL+"/api/dashboard/stats/advanced", results.DashboardAdvancedStats)
 
 	// PHP frontend default values compatibility
 	r.HandleFunc(conf.BaseURL+"/empty.php", empty)

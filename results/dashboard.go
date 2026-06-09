@@ -117,3 +117,33 @@ func DashboardTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonResponse(w, points)
 }
+
+// DashboardHeatmap returns GPS points with quality intensity for heatmap rendering.
+// GET /api/dashboard/heatmap
+func DashboardHeatmap(w http.ResponseWriter, r *http.Request) {
+	if !mongoRequired(w) {
+		return
+	}
+	points, err := database.MongoDB.FetchHeatmap()
+	if err != nil {
+		log.Errorf("DashboardHeatmap error: %s", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, points)
+}
+
+// DashboardAdvancedStats returns percentile stats per operator.
+// GET /api/dashboard/stats/advanced
+func DashboardAdvancedStats(w http.ResponseWriter, r *http.Request) {
+	if !mongoRequired(w) {
+		return
+	}
+	stats, err := database.MongoDB.FetchAdvancedStats()
+	if err != nil {
+		log.Errorf("DashboardAdvancedStats error: %s", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	jsonResponse(w, stats)
+}
