@@ -81,6 +81,13 @@ func ListenAndServe(conf *config.Config) error {
 	r.Get(conf.BaseURL+"/results/json", results.JSONResult)
 	r.Get(conf.BaseURL+"/backend/results/json", results.JSONResult)
 
+	// Dashboard API endpoints
+	r.Get(conf.BaseURL+"/api/dashboard/summary", results.DashboardSummary)
+	r.Get(conf.BaseURL+"/api/dashboard/results", results.DashboardResults)
+	r.Get(conf.BaseURL+"/api/dashboard/operators", results.DashboardOperators)
+	r.Get(conf.BaseURL+"/api/dashboard/map", results.DashboardMap)
+	r.Get(conf.BaseURL+"/api/dashboard/timeline", results.DashboardTimeline)
+
 	// PHP frontend default values compatibility
 	r.HandleFunc(conf.BaseURL+"/empty.php", empty)
 	r.HandleFunc(conf.BaseURL+"/backend/empty.php", empty)

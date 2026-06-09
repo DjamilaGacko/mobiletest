@@ -26,8 +26,9 @@ type Config struct {
 	DatabaseUsername string `mapstructure:"database_username"`
 	DatabasePassword string `mapstructure:"database_password"`
 
-	DatabaseFile string `mapstructure:"database_file"`
-	DatabasePort string `mapstructure:"database_port"`
+	DatabaseFile             string `mapstructure:"database_file"`
+	DatabasePort             string `mapstructure:"database_port"`
+	DatabaseConnectionString string `mapstructure:"database_connection_string"`
 
 	GeoIPDatabaseFile string `mapstructure:"geoip_database_file"`
 

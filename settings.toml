@@ -20,18 +20,21 @@ statistics_password="PASSWORD"
 # redact IP addresses
 redact_ip_addresses=false
 
-# database type for statistics data, currently supports: none, memory, bolt, mysql, postgresql, sqlite, mssql
-# if none is specified, no telemetry/stats will be recorded, and no result PNG will be generated
-database_type="sqlite"
+# database type: none, memory, bolt, mysql, postgresql, sqlite, mssql, mongodb
+database_type="mongodb"
+
+# MongoDB Atlas connection string (used when database_type="mongodb")
+# Set via environment variable SPEEDTEST_DATABASE_CONNECTION_STRING on Render
+database_connection_string=""
+
+# MongoDB database name (default: yele_speedtest)
+database_name="yele_speedtest"
+
+# Legacy SQL settings (unused when database_type="mongodb")
 database_hostname=""
-database_name=""
 database_username=""
 database_password=""
-# database port (optional, defaults to driver default)
 database_port=""
-
-# if you use `bolt` as database, set database_file to database file location
-# if you use `sqlite` as database, set database_file to database file location
 database_file="speedtest.db"
 
 # GeoIP offline database (.mmdb format) for ISP and country detection when ipinfo.io API is not available

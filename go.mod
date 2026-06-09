@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/breml/rootcerts v0.2.1
+	go.mongodb.org/mongo-driver v1.17.0
 	github.com/coreos/go-systemd/v22 v22.4.0
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-chi/chi/v5 v5.0.7

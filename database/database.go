@@ -4,6 +4,7 @@ import (
 	"github.com/librespeed/speedtest-go/config"
 	"github.com/librespeed/speedtest-go/database/bolt"
 	"github.com/librespeed/speedtest-go/database/memory"
+	"github.com/librespeed/speedtest-go/database/mongodb"
 	"github.com/librespeed/speedtest-go/database/mssql"
 	"github.com/librespeed/speedtest-go/database/mysql"
 	"github.com/librespeed/speedtest-go/database/none"
@@ -15,7 +16,8 @@ import (
 )
 
 var (
-	DB DataAccess
+	DB         DataAccess
+	MongoDB    *mongodb.MongoDB
 )
 
 type DataAccess interface {
@@ -36,6 +38,14 @@ func SetDBInfo(conf *config.Config) {
 		DB = sqlite.Open(conf.DatabaseFile)
 	case "mssql":
 		DB = mssql.Open(conf.DatabaseHostname, conf.DatabaseUsername, conf.DatabasePassword, conf.DatabaseName, conf.DatabasePort)
+	case "mongodb":
+		dbName := conf.DatabaseName
+		if dbName == "" {
+			dbName = "yele_speedtest"
+		}
+		m := mongodb.Open(conf.DatabaseConnectionString, dbName)
+		DB = m
+		MongoDB = m
 	case "memory":
 		DB = memory.Open("")
 	case "none":
