@@ -46,6 +46,17 @@ type Document struct {
 	Longitude   float64 `bson:"longitude"    json:"longitude"`
 	QoERating   int     `bson:"qoe_rating"   json:"qoeRating"`
 	QoeSat      string  `bson:"qoe_sat"      json:"qoeSatisfaction"`
+	// Streaming test results (zero values = test not performed)
+	StreamingStartupMs     int     `bson:"streaming_startup_ms"     json:"streamingStartupMs"`
+	StreamingRebufferCount int     `bson:"streaming_rebuffer_count" json:"streamingRebufferCount"`
+	StreamingRebufferRatio float64 `bson:"streaming_rebuffer_ratio" json:"streamingRebufferRatio"`
+	StreamingMaxResolution string  `bson:"streaming_max_resolution" json:"streamingMaxResolution"`
+	StreamingScore         float64 `bson:"streaming_score"          json:"streamingScore"`
+	// Browsing test results (zero values = test not performed)
+	BrowsingAvgLoadMs   float64 `bson:"browsing_avg_load_ms"  json:"browsingAvgLoadMs"`
+	BrowsingSuccessRate float64 `bson:"browsing_success_rate" json:"browsingSuccessRate"`
+	BrowsingPagesTested int     `bson:"browsing_pages_tested" json:"browsingPagesTested"`
+	BrowsingScore       float64 `bson:"browsing_score"        json:"browsingScore"`
 	// From ISPInfo
 	City    string `bson:"city"    json:"city"`
 	Country string `bson:"country" json:"country"`
@@ -61,6 +72,17 @@ type mobileExtra struct {
 	Longitude       float64 `json:"longitude"`
 	QoERating       int     `json:"qoeRating"`
 	QoeSatisfaction string  `json:"qoeSatisfaction"`
+	// Streaming test (optional, sent when the test was performed)
+	StreamingStartupMs     int     `json:"streamingStartupMs"`
+	StreamingRebufferCount int     `json:"streamingRebufferCount"`
+	StreamingRebufferRatio float64 `json:"streamingRebufferRatio"`
+	StreamingMaxResolution string  `json:"streamingMaxResolution"`
+	StreamingScore         float64 `json:"streamingScore"`
+	// Browsing test (optional, sent when the test was performed)
+	BrowsingAvgLoadMs   float64 `json:"browsingAvgLoadMs"`
+	BrowsingSuccessRate float64 `json:"browsingSuccessRate"`
+	BrowsingPagesTested int     `json:"browsingPagesTested"`
+	BrowsingScore       float64 `json:"browsingScore"`
 }
 
 type ispInfo struct {
@@ -85,6 +107,11 @@ type OperatorStat struct {
 	AvgDownload float64 `json:"avgDownload"`
 	AvgUpload   float64 `json:"avgUpload"`
 	AvgPing     float64 `json:"avgPing"`
+	// Averages computed only over tests where streaming/browsing was performed
+	AvgStreamingScore float64 `json:"avgStreamingScore"`
+	StreamingTests    int     `json:"streamingTests"`
+	AvgBrowsingLoadMs float64 `json:"avgBrowsingLoadMs"`
+	BrowsingTests     int     `json:"browsingTests"`
 }
 
 type MapPoint struct {
@@ -97,6 +124,12 @@ type MapPoint struct {
 	Ping        float64 `json:"ping"`
 	Location    string  `json:"location"`
 	Timestamp   string  `json:"timestamp"`
+	// Streaming & browsing metrics (zero = test not performed)
+	StreamingScore         float64 `json:"streamingScore"`
+	StreamingMaxResolution string  `json:"streamingMaxResolution"`
+	StreamingRebufferRatio float64 `json:"streamingRebufferRatio"`
+	BrowsingAvgLoadMs      float64 `json:"browsingAvgLoadMs"`
+	BrowsingScore          float64 `json:"browsingScore"`
 }
 
 type HeatPoint struct {
@@ -306,6 +339,19 @@ func (m *MongoDB) FetchOperatorStats() ([]OperatorStat, error) {
 			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$dl"}}}}},
 			{Key: "avgUl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$ul"}}}}},
 			{Key: "avgPing", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$ping"}}}}},
+			// $avg ignores nulls: only tests where streaming/browsing was performed count
+			{Key: "avgStreaming", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$cond", Value: bson.A{
+				bson.D{{Key: "$gt", Value: bson.A{"$streaming_score", 0}}}, "$streaming_score", nil,
+			}}}}}},
+			{Key: "streamingTests", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
+				bson.D{{Key: "$gt", Value: bson.A{"$streaming_score", 0}}}, 1, 0,
+			}}}}}},
+			{Key: "avgBrowsing", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$cond", Value: bson.A{
+				bson.D{{Key: "$gt", Value: bson.A{"$browsing_avg_load_ms", 0}}}, "$browsing_avg_load_ms", nil,
+			}}}}}},
+			{Key: "browsingTests", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
+				bson.D{{Key: "$gt", Value: bson.A{"$browsing_avg_load_ms", 0}}}, 1, 0,
+			}}}}}},
 		}}},
 		{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}},
 		{{Key: "$limit", Value: 20}},
@@ -322,18 +368,33 @@ func (m *MongoDB) FetchOperatorStats() ([]OperatorStat, error) {
 		AvgDl   float64 `bson:"avgDl"`
 		AvgUl   float64 `bson:"avgUl"`
 		AvgPing float64 `bson:"avgPing"`
+		// Pointers: $avg returns null when no test was performed for the operator
+		AvgStreaming   *float64 `bson:"avgStreaming"`
+		StreamingTests int      `bson:"streamingTests"`
+		AvgBrowsing    *float64 `bson:"avgBrowsing"`
+		BrowsingTests  int      `bson:"browsingTests"`
 	}
 	if err := cursor.All(ctx, &agg); err != nil {
 		return nil, err
 	}
+	deref := func(p *float64) float64 {
+		if p == nil {
+			return 0
+		}
+		return *p
+	}
 	stats := make([]OperatorStat, len(agg))
 	for i, r := range agg {
 		stats[i] = OperatorStat{
-			Operator:    r.ID,
-			Count:       r.Count,
-			AvgDownload: round2(r.AvgDl),
-			AvgUpload:   round2(r.AvgUl),
-			AvgPing:     round2(r.AvgPing),
+			Operator:          r.ID,
+			Count:             r.Count,
+			AvgDownload:       round2(r.AvgDl),
+			AvgUpload:         round2(r.AvgUl),
+			AvgPing:           round2(r.AvgPing),
+			AvgStreamingScore: round2(deref(r.AvgStreaming)),
+			StreamingTests:    r.StreamingTests,
+			AvgBrowsingLoadMs: round2(deref(r.AvgBrowsing)),
+			BrowsingTests:     r.BrowsingTests,
 		}
 	}
 	return stats, nil
@@ -370,6 +431,11 @@ func (m *MongoDB) FetchMapPoints() ([]MapPoint, error) {
 			Ping:        round2(ping),
 			Location:    doc.Location,
 			Timestamp:   doc.Timestamp.Format("02/01/2006 15:04"),
+			StreamingScore:         round2(doc.StreamingScore),
+			StreamingMaxResolution: doc.StreamingMaxResolution,
+			StreamingRebufferRatio: round2(doc.StreamingRebufferRatio),
+			BrowsingAvgLoadMs:      round2(doc.BrowsingAvgLoadMs),
+			BrowsingScore:          round2(doc.BrowsingScore),
 		})
 	}
 	return points, nil
@@ -553,6 +619,15 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 			doc.Longitude = extra.Longitude
 			doc.QoERating = extra.QoERating
 			doc.QoeSat = extra.QoeSatisfaction
+			doc.StreamingStartupMs = extra.StreamingStartupMs
+			doc.StreamingRebufferCount = extra.StreamingRebufferCount
+			doc.StreamingRebufferRatio = extra.StreamingRebufferRatio
+			doc.StreamingMaxResolution = extra.StreamingMaxResolution
+			doc.StreamingScore = extra.StreamingScore
+			doc.BrowsingAvgLoadMs = extra.BrowsingAvgLoadMs
+			doc.BrowsingSuccessRate = extra.BrowsingSuccessRate
+			doc.BrowsingPagesTested = extra.BrowsingPagesTested
+			doc.BrowsingScore = extra.BrowsingScore
 		}
 	}
 

@@ -184,19 +184,30 @@ func garbage(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("Invalid chunk size: %s", ckSize)
 			log.Warnf("Will use default value %d", chunks)
 		} else {
-			// limit max chunk size to 1024
-			if i > 1024 {
-				chunks = 1024
+			// limit max chunk size to 8 (8 MiB) to avoid Render's 30s proxy timeout
+			if i > 8 {
+				chunks = 8
 			} else {
 				chunks = int(i)
 			}
 		}
 	}
 
+	ctx := r.Context()
+	flusher, canFlush := w.(http.Flusher)
 	for i := 0; i < chunks; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if _, err := w.Write(randomData); err != nil {
-			log.Errorf("Error writing back to client at chunk number %d: %s", i, err)
-			break
+			// client disconnected — not a server error, log at debug level
+			log.Debugf("Client disconnected at chunk %d: %s", i, err)
+			return
+		}
+		if canFlush {
+			flusher.Flush()
 		}
 	}
 }
