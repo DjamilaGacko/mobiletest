@@ -253,11 +253,13 @@ func (m *MongoDB) FetchSummary() (*SummaryStats, error) {
 	testsToday, _ := m.collection.CountDocuments(ctx, bson.M{"timestamp": bson.M{"$gte": today}})
 
 	pipeline := mongo.Pipeline{
+		// Exclude empty/incomplete telemetry records from the averages
+		{{Key: "$match", Value: bson.M{"dl": bson.M{"$nin": bson.A{"", nil}}}}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: nil},
-			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$dl"}}}}},
-			{Key: "avgUl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$ul"}}}}},
-			{Key: "avgPing", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$ping"}}}}},
+			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$dl")}}},
+			{Key: "avgUl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$ul")}}},
+			{Key: "avgPing", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$ping")}}},
 		}}},
 	}
 	cursor, err := m.collection.Aggregate(ctx, pipeline)
@@ -336,9 +338,9 @@ func (m *MongoDB) FetchOperatorStats() ([]OperatorStat, error) {
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$operator"},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
-			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$dl"}}}}},
-			{Key: "avgUl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$ul"}}}}},
-			{Key: "avgPing", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$ping"}}}}},
+			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$dl")}}},
+			{Key: "avgUl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$ul")}}},
+			{Key: "avgPing", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$ping")}}},
 			// $avg ignores nulls: only tests where streaming/browsing was performed count
 			{Key: "avgStreaming", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$cond", Value: bson.A{
 				bson.D{{Key: "$gt", Value: bson.A{"$streaming_score", 0}}}, "$streaming_score", nil,
@@ -447,14 +449,17 @@ func (m *MongoDB) FetchTimeline(days int) ([]TimelinePoint, error) {
 
 	from := time.Now().AddDate(0, 0, -days)
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"timestamp": bson.M{"$gte": from}}}},
+		{{Key: "$match", Value: bson.M{
+			"timestamp": bson.M{"$gte": from},
+			"dl":        bson.M{"$nin": bson.A{"", nil}},
+		}}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
 				{Key: "format", Value: "%Y-%m-%d"},
 				{Key: "date", Value: "$timestamp"},
 			}}}},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
-			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: bson.D{{Key: "$toDouble", Value: "$dl"}}}}},
+			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$dl")}}},
 		}}},
 		{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	}
@@ -521,9 +526,9 @@ func (m *MongoDB) FetchAdvancedStats() ([]OperatorAdvancedStats, error) {
 		{{Key: "$match", Value: bson.M{"operator": bson.M{"$ne": ""}}}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$operator"},
-			{Key: "downloads", Value: bson.D{{Key: "$push", Value: bson.D{{Key: "$toDouble", Value: "$dl"}}}}},
-			{Key: "uploads", Value: bson.D{{Key: "$push", Value: bson.D{{Key: "$toDouble", Value: "$ul"}}}}},
-			{Key: "pings", Value: bson.D{{Key: "$push", Value: bson.D{{Key: "$toDouble", Value: "$ping"}}}}},
+			{Key: "downloads", Value: bson.D{{Key: "$push", Value: toDoubleSafe("$dl")}}},
+			{Key: "uploads", Value: bson.D{{Key: "$push", Value: toDoubleSafe("$ul")}}},
+			{Key: "pings", Value: bson.D{{Key: "$push", Value: toDoubleSafe("$ping")}}},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
 		}}},
 		{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}},
@@ -665,4 +670,16 @@ func (m *MongoDB) toTelemetryData(doc *Document) *schema.TelemetryData {
 
 func round2(f float64) float64 {
 	return math.Round(f*100) / 100
+}
+
+// toDoubleSafe converts a string field to double in an aggregation pipeline,
+// falling back to 0 for empty strings, nulls or invalid values instead of
+// failing the whole aggregation (telemetry records can have empty fields).
+func toDoubleSafe(field string) bson.D {
+	return bson.D{{Key: "$convert", Value: bson.D{
+		{Key: "input", Value: field},
+		{Key: "to", Value: "double"},
+		{Key: "onError", Value: 0},
+		{Key: "onNull", Value: 0},
+	}}}
 }
