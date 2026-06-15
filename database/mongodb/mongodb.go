@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -85,10 +86,16 @@ type mobileExtra struct {
 	BrowsingScore       float64 `json:"browsingScore"`
 }
 
+// ispInfo matches the real shape stored in the isp_info field:
+// {"processedString":"...","rawIspInfo":{"city":"...","country":"...","org":"...","loc":"lat,lng"}}
 type ispInfo struct {
-	City    string `json:"city"`
-	Country string `json:"country"`
-	Org     string `json:"org"`
+	ProcessedString string `json:"processedString"`
+	RawISPInfo      struct {
+		City    string `json:"city"`
+		Country string `json:"country"`
+		Org     string `json:"org"`
+		Loc     string `json:"loc"`
+	} `json:"rawIspInfo"`
 }
 
 // Dashboard response types
@@ -636,19 +643,68 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 		}
 	}
 
-	// Parse ISPInfo for city/country and fallback operator
+	// Parse ISPInfo for city/country/location and fallback operator + coordinates.
+	// Web tests (no `extra`) rely entirely on this IP-based info.
 	if data.ISPInfo != "" && data.ISPInfo != "{}" {
 		var isp ispInfo
 		if err := json.Unmarshal([]byte(data.ISPInfo), &isp); err == nil {
-			doc.City = isp.City
-			doc.Country = isp.Country
-			if doc.Operator == "" && isp.Org != "" {
-				doc.Operator = isp.Org
+			raw := isp.RawISPInfo
+			doc.City = raw.City
+			doc.Country = raw.Country
+
+			if doc.Operator == "" && raw.Org != "" {
+				doc.Operator = cleanOrg(raw.Org)
+			}
+
+			// Human-readable location label when the app didn't send one
+			if doc.Location == "" {
+				switch {
+				case raw.City != "" && raw.Country != "":
+					doc.Location = raw.City + ", " + raw.Country
+				case raw.City != "":
+					doc.Location = raw.City
+				case raw.Country != "":
+					doc.Location = raw.Country
+				}
+			}
+
+			// Coordinates from IP geolocation ("lat,lng") when no GPS was sent
+			if doc.Latitude == 0 && doc.Longitude == 0 && raw.Loc != "" {
+				if parts := strings.Split(raw.Loc, ","); len(parts) == 2 {
+					lat, errLat := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+					lng, errLng := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+					if errLat == nil && errLng == nil {
+						doc.Latitude = lat
+						doc.Longitude = lng
+					}
+				}
 			}
 		}
 	}
 
 	return doc
+}
+
+// cleanOrg strips the leading "AS<number> " autonomous-system prefix from an
+// ISP organization string, e.g. "AS327871 ANPTIC" -> "ANPTIC", matching the
+// behavior of the getIP web handler.
+func cleanOrg(org string) string {
+	if strings.HasPrefix(org, "AS") {
+		if i := strings.IndexByte(org, ' '); i > 2 {
+			digits := org[2:i]
+			allDigits := true
+			for _, c := range digits {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return strings.TrimSpace(org[i+1:])
+			}
+		}
+	}
+	return org
 }
 
 func (m *MongoDB) toTelemetryData(doc *Document) *schema.TelemetryData {
