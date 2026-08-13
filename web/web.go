@@ -8,9 +8,12 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -89,6 +92,24 @@ func ListenAndServe(conf *config.Config) error {
 	r.Get(conf.BaseURL+"/api/dashboard/timeline", results.DashboardTimeline)
 	r.Get(conf.BaseURL+"/api/dashboard/heatmap", results.DashboardHeatmap)
 	r.Get(conf.BaseURL+"/api/dashboard/stats/advanced", results.DashboardAdvancedStats)
+
+	// Proxy vers le micro-service IA (prédiction + détection d'anomalies).
+	// /api/ai/anomalies -> <ai_service_url>/ai/anomalies
+	// Désactivé si ai_service_url est vide (SPEEDTEST_AI_SERVICE_URL).
+	if conf.AIServiceURL != "" {
+		if target, err := url.Parse(conf.AIServiceURL); err == nil {
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			apiPrefix := conf.BaseURL + "/api"
+			r.HandleFunc(conf.BaseURL+"/api/ai/*", func(w http.ResponseWriter, req *http.Request) {
+				req.URL.Path = strings.TrimPrefix(req.URL.Path, apiPrefix)
+				req.Host = target.Host
+				proxy.ServeHTTP(w, req)
+			})
+			log.Infof("AI service proxied at /api/ai/* -> %s", conf.AIServiceURL)
+		} else {
+			log.Warnf("Invalid ai_service_url %q: %s", conf.AIServiceURL, err)
+		}
+	}
 
 	// PHP frontend default values compatibility
 	r.HandleFunc(conf.BaseURL+"/empty.php", empty)

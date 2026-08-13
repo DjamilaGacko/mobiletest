@@ -32,6 +32,10 @@ type Config struct {
 
 	GeoIPDatabaseFile string `mapstructure:"geoip_database_file"`
 
+	// URL du micro-service IA (FastAPI) proxifié sous /api/ai/*.
+	// Vide = fonctionnalité désactivée.
+	AIServiceURL string `mapstructure:"ai_service_url"`
+
 	EnableHTTP2 bool   `mapstructure:"enable_http2"`
 	EnableTLS   bool   `mapstructure:"enable_tls"`
 	TLSCertFile string `mapstructure:"tls_cert_file"`
@@ -61,6 +65,14 @@ func init() {
 
 	viper.SetConfigName("settings")
 	viper.AddConfigPath(".")
+
+	// Secrets lus depuis l'environnement (préfixe SPEEDTEST_), jamais commités.
+	// Ex. SPEEDTEST_IPINFO_API_KEY, SPEEDTEST_STATISTICS_PASSWORD,
+	//     SPEEDTEST_DATABASE_CONNECTION_STRING.
+	_ = viper.BindEnv("ipinfo_api_key")
+	_ = viper.BindEnv("statistics_password")
+	_ = viper.BindEnv("database_connection_string")
+	_ = viper.BindEnv("ai_service_url")
 }
 
 func Load(configPath string) Config {
