@@ -290,6 +290,22 @@ func withoutPassive(filter bson.M) bson.M {
 	return filter
 }
 
+// speedOnly ne retient que les mesures de débit réellement abouties.
+//
+// Écarte, en plus des relèves passives, les tests dont le débit est nul :
+// ce sont des tests qui ont échoué, pas des zones à mauvaise couverture. Les
+// afficher en rouge sur la carte induirait le lecteur en erreur, et les
+// compter dans les moyennes les tirerait artificiellement vers le bas. Ils
+// restent en base et visibles dans l'historique.
+//
+// La comparaison passe par $expr car `dl` est stocké en texte, sous des formes
+// variables ("0" côté service natif, "0.00" côté application).
+func speedOnly(filter bson.M) bson.M {
+	filter = withoutPassive(filter)
+	filter["$expr"] = bson.D{{Key: "$gt", Value: bson.A{toDoubleSafe("$dl"), 0}}}
+	return filter
+}
+
 func (m *MongoDB) FetchSummary() (*SummaryStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -304,8 +320,9 @@ func (m *MongoDB) FetchSummary() (*SummaryStats, error) {
 		withoutPassive(bson.M{"timestamp": bson.M{"$gte": today}}))
 
 	pipeline := mongo.Pipeline{
-		// Exclude empty/incomplete telemetry records from the averages
-		{{Key: "$match", Value: withoutPassive(bson.M{"dl": bson.M{"$nin": bson.A{"", nil}}})}},
+		// Moyennes calculées sur les seuls tests de débit aboutis : les tests
+		// échoués (débit nul) fausseraient la moyenne vers le bas.
+		{{Key: "$match", Value: speedOnly(bson.M{"dl": bson.M{"$nin": bson.A{"", nil}}})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: nil},
 			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$dl")}}},
@@ -385,7 +402,7 @@ func (m *MongoDB) FetchOperatorStats() ([]OperatorStat, error) {
 	defer cancel()
 
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: withoutPassive(bson.M{"operator": bson.M{"$ne": ""}})}},
+		{{Key: "$match", Value: speedOnly(bson.M{"operator": bson.M{"$ne": ""}})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$operator"},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
@@ -457,7 +474,7 @@ func (m *MongoDB) FetchMapPoints() ([]MapPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	filter := withoutPassive(bson.M{
+	filter := speedOnly(bson.M{
 		"latitude":  bson.M{"$ne": 0},
 		"longitude": bson.M{"$ne": 0},
 	})
@@ -505,7 +522,7 @@ func (m *MongoDB) FetchTimeline(days int) ([]TimelinePoint, error) {
 
 	from := time.Now().AddDate(0, 0, -days)
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: withoutPassive(bson.M{
+		{{Key: "$match", Value: speedOnly(bson.M{
 			"timestamp": bson.M{"$gte": from},
 			"dl":        bson.M{"$nin": bson.A{"", nil}},
 		})}},
@@ -544,7 +561,7 @@ func (m *MongoDB) FetchHeatmap() ([]HeatPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	filter := withoutPassive(bson.M{
+	filter := speedOnly(bson.M{
 		"latitude":  bson.M{"$ne": 0},
 		"longitude": bson.M{"$ne": 0},
 	})
@@ -579,7 +596,7 @@ func (m *MongoDB) FetchAdvancedStats() ([]OperatorAdvancedStats, error) {
 	defer cancel()
 
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: withoutPassive(bson.M{"operator": bson.M{"$ne": ""}})}},
+		{{Key: "$match", Value: speedOnly(bson.M{"operator": bson.M{"$ne": ""}})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$operator"},
 			{Key: "downloads", Value: bson.D{{Key: "$push", Value: toDoubleSafe("$dl")}}},
