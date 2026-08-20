@@ -28,19 +28,23 @@ type Document struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty"      json:"id"`
 	UUID        string             `bson:"uuid"               json:"uuid"`
 	Timestamp   time.Time          `bson:"timestamp"          json:"timestamp"`
-	IPAddress   string             `bson:"ip_address"         json:"ipAddress"`
-	ISPInfo     string             `bson:"isp_info"           json:"ispInfo"`
+	// Champs sensibles (PII) : stockés en base mais JAMAIS renvoyés par l'API
+	// publique du dashboard (json:"-"). Voir audit sécurité #1.
+	IPAddress   string             `bson:"ip_address"         json:"-"`
+	ISPInfo     string             `bson:"isp_info"           json:"-"`
 	Download    string             `bson:"dl"                 json:"download"`
 	Upload      string             `bson:"ul"                 json:"upload"`
 	Ping        string             `bson:"ping"               json:"ping"`
 	Jitter      string             `bson:"jitter"             json:"jitter"`
-	ExtraRaw    string             `bson:"extra_raw"          json:"extraRaw"`
-	UserAgent   string             `bson:"user_agent"         json:"userAgent"`
-	Language    string             `bson:"language"           json:"language"`
-	Log         string             `bson:"log"                json:"log"`
+	ExtraRaw    string             `bson:"extra_raw"          json:"-"`
+	UserAgent   string             `bson:"user_agent"         json:"-"`
+	Language    string             `bson:"language"           json:"-"`
+	Log         string             `bson:"log"                json:"-"`
 	// Mobile-specific parsed fields
 	Operator    string  `bson:"operator"     json:"operator"`
 	NetworkType string  `bson:"network_type" json:"networkType"`
+	SimOperator string  `bson:"sim_operator" json:"simOperator"`
+	CellularTech string `bson:"cellular_tech" json:"cellularTech"`
 	DeviceModel string  `bson:"device_model" json:"deviceModel"`
 	Location    string  `bson:"location"     json:"location"`
 	Latitude    float64 `bson:"latitude"     json:"latitude"`
@@ -58,6 +62,14 @@ type Document struct {
 	BrowsingSuccessRate float64 `bson:"browsing_success_rate" json:"browsingSuccessRate"`
 	BrowsingPagesTested int     `bson:"browsing_pages_tested" json:"browsingPagesTested"`
 	BrowsingScore       float64 `bson:"browsing_score"        json:"browsingScore"`
+	// Mesure passive (collecte de couverture en arrière-plan).
+	// MeasurementType vaut "active" pour un test lancé par l'utilisateur et
+	// "passive" pour une relève automatique sans speedtest. Vide pour les
+	// enregistrements antérieurs à l'introduction du champ : ils sont tous
+	// des tests actifs.
+	MeasurementType string `bson:"measurement_type" json:"measurementType"`
+	SignalDbm       int    `bson:"signal_dbm"       json:"signalDbm"`
+	SignalLevel     int    `bson:"signal_level"     json:"signalLevel"`
 	// From ISPInfo
 	City    string `bson:"city"    json:"city"`
 	Country string `bson:"country" json:"country"`
@@ -67,6 +79,8 @@ type Document struct {
 type mobileExtra struct {
 	Operator        string  `json:"operator"`
 	NetworkType     string  `json:"networkType"`
+	SimOperator     string  `json:"simOperator"`
+	CellularTech    string  `json:"cellularTech"`
 	DeviceModel     string  `json:"deviceModel"`
 	Location        string  `json:"location"`
 	Latitude        float64 `json:"latitude"`
@@ -84,6 +98,11 @@ type mobileExtra struct {
 	BrowsingSuccessRate float64 `json:"browsingSuccessRate"`
 	BrowsingPagesTested int     `json:"browsingPagesTested"`
 	BrowsingScore       float64 `json:"browsingScore"`
+	// Collecte passive de couverture : "active" (test utilisateur) ou
+	// "passive" (relève automatique, sans mesure de débit).
+	Type        string `json:"type"`
+	SignalDbm   int    `json:"signalDbm"`
+	SignalLevel int    `json:"signalLevel"`
 }
 
 // ispInfo matches the real shape stored in the isp_info field:
@@ -126,6 +145,8 @@ type MapPoint struct {
 	Lng         float64 `json:"lng"`
 	Operator    string  `json:"operator"`
 	NetworkType string  `json:"networkType"`
+	SimOperator string  `json:"simOperator"`
+	CellularTech string `json:"cellularTech"`
 	Download    float64 `json:"download"`
 	Upload      float64 `json:"upload"`
 	Ping        float64 `json:"ping"`
@@ -247,21 +268,44 @@ func (m *MongoDB) FetchLast100() ([]schema.TelemetryData, error) {
 
 // ── Dashboard methods ─────────────────────────────────────────────────────────
 
+// excludePassive écarte les relèves de couverture passives de toute statistique
+// portant sur le débit.
+//
+// Ces relèves n'exécutent aucun speedtest : leurs champs dl/ul/ping valent 0.
+// Sans ce filtre, elles apparaîtraient sur la carte comme des zones à
+// « débit très limité » et tireraient toutes les moyennes vers le bas, alors
+// qu'elles ne mesurent pas le débit du tout.
+//
+// `$ne` retient aussi les documents dépourvus du champ : les enregistrements
+// antérieurs à l'introduction du marqueur restent donc comptés, ce qui est
+// correct puisqu'ils proviennent tous de tests actifs.
+var excludePassive = bson.M{"$ne": "passive"}
+
+// withoutPassive ajoute le filtre ci-dessus à un filtre existant.
+func withoutPassive(filter bson.M) bson.M {
+	if filter == nil {
+		filter = bson.M{}
+	}
+	filter["measurement_type"] = excludePassive
+	return filter
+}
+
 func (m *MongoDB) FetchSummary() (*SummaryStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	total, err := m.collection.CountDocuments(ctx, bson.M{})
+	total, err := m.collection.CountDocuments(ctx, withoutPassive(bson.M{}))
 	if err != nil {
 		return nil, err
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
-	testsToday, _ := m.collection.CountDocuments(ctx, bson.M{"timestamp": bson.M{"$gte": today}})
+	testsToday, _ := m.collection.CountDocuments(ctx,
+		withoutPassive(bson.M{"timestamp": bson.M{"$gte": today}}))
 
 	pipeline := mongo.Pipeline{
 		// Exclude empty/incomplete telemetry records from the averages
-		{{Key: "$match", Value: bson.M{"dl": bson.M{"$nin": bson.A{"", nil}}}}},
+		{{Key: "$match", Value: withoutPassive(bson.M{"dl": bson.M{"$nin": bson.A{"", nil}}})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: nil},
 			{Key: "avgDl", Value: bson.D{{Key: "$avg", Value: toDoubleSafe("$dl")}}},
@@ -295,7 +339,7 @@ func (m *MongoDB) FetchResults(page, limit int, operator, networkType, from, to 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	filter := bson.M{}
+	filter := withoutPassive(bson.M{})
 	if operator != "" {
 		filter["operator"] = bson.M{"$regex": operator, "$options": "i"}
 	}
@@ -341,7 +385,7 @@ func (m *MongoDB) FetchOperatorStats() ([]OperatorStat, error) {
 	defer cancel()
 
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"operator": bson.M{"$ne": ""}}}},
+		{{Key: "$match", Value: withoutPassive(bson.M{"operator": bson.M{"$ne": ""}})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$operator"},
 			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
@@ -413,7 +457,10 @@ func (m *MongoDB) FetchMapPoints() ([]MapPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	filter := bson.M{"latitude": bson.M{"$ne": 0}, "longitude": bson.M{"$ne": 0}}
+	filter := withoutPassive(bson.M{
+		"latitude":  bson.M{"$ne": 0},
+		"longitude": bson.M{"$ne": 0},
+	})
 	opts := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(1000)
 	cursor, err := m.collection.Find(ctx, filter, opts)
 	if err != nil {
@@ -431,11 +478,13 @@ func (m *MongoDB) FetchMapPoints() ([]MapPoint, error) {
 		ul, _ := strconv.ParseFloat(doc.Upload, 64)
 		ping, _ := strconv.ParseFloat(doc.Ping, 64)
 		points = append(points, MapPoint{
-			Lat:         doc.Latitude,
-			Lng:         doc.Longitude,
-			Operator:    doc.Operator,
-			NetworkType: doc.NetworkType,
-			Download:    round2(dl),
+			Lat:          doc.Latitude,
+			Lng:          doc.Longitude,
+			Operator:     doc.Operator,
+			NetworkType:  doc.NetworkType,
+			SimOperator:  doc.SimOperator,
+			CellularTech: doc.CellularTech,
+			Download:     round2(dl),
 			Upload:      round2(ul),
 			Ping:        round2(ping),
 			Location:    doc.Location,
@@ -456,10 +505,10 @@ func (m *MongoDB) FetchTimeline(days int) ([]TimelinePoint, error) {
 
 	from := time.Now().AddDate(0, 0, -days)
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
+		{{Key: "$match", Value: withoutPassive(bson.M{
 			"timestamp": bson.M{"$gte": from},
 			"dl":        bson.M{"$nin": bson.A{"", nil}},
-		}}},
+		})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
 				{Key: "format", Value: "%Y-%m-%d"},
@@ -495,10 +544,10 @@ func (m *MongoDB) FetchHeatmap() ([]HeatPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	filter := bson.M{
+	filter := withoutPassive(bson.M{
 		"latitude":  bson.M{"$ne": 0},
 		"longitude": bson.M{"$ne": 0},
-	}
+	})
 	cursor, err := m.collection.Find(ctx, filter,
 		options.Find().SetProjection(bson.M{"latitude": 1, "longitude": 1, "dl": 1}),
 	)
@@ -530,7 +579,7 @@ func (m *MongoDB) FetchAdvancedStats() ([]OperatorAdvancedStats, error) {
 	defer cancel()
 
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"operator": bson.M{"$ne": ""}}}},
+		{{Key: "$match", Value: withoutPassive(bson.M{"operator": bson.M{"$ne": ""}})}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: "$operator"},
 			{Key: "downloads", Value: bson.D{{Key: "$push", Value: toDoubleSafe("$dl")}}},
@@ -625,6 +674,8 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 		if err := json.Unmarshal([]byte(data.Extra), &extra); err == nil {
 			doc.Operator = extra.Operator
 			doc.NetworkType = extra.NetworkType
+			doc.SimOperator = extra.SimOperator
+			doc.CellularTech = extra.CellularTech
 			doc.DeviceModel = extra.DeviceModel
 			doc.Location = extra.Location
 			doc.Latitude = extra.Latitude
@@ -640,6 +691,14 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 			doc.BrowsingSuccessRate = extra.BrowsingSuccessRate
 			doc.BrowsingPagesTested = extra.BrowsingPagesTested
 			doc.BrowsingScore = extra.BrowsingScore
+			doc.SignalDbm = extra.SignalDbm
+			doc.SignalLevel = extra.SignalLevel
+			// Un `extra` sans type explicite provient d'une version antérieure
+			// de l'application mobile : c'était nécessairement un test actif.
+			doc.MeasurementType = extra.Type
+			if doc.MeasurementType == "" {
+				doc.MeasurementType = "active"
+			}
 		}
 	}
 

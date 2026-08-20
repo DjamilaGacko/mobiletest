@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../mobilefront"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../../new_web"
+		},
+		{
+			"path": "../../ai"
+		}
+	]
+}

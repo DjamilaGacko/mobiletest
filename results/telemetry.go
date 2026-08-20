@@ -151,6 +151,14 @@ func Record(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limite la taille du corps (télémétrie = quelques champs courts) pour
+	// éviter les envois abusifs. Voir audit sécurité #4.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 Kio
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
 	ipAddr := r.Header.Get("X-Forwarded-For")
 	if ipAddr == "" {
 		ipAddr, _, _ = net.SplitHostPort(r.RemoteAddr)
