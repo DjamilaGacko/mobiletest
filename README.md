@@ -1,176 +1,283 @@
-![LibreSpeed Logo](https://github.com/librespeed/speedtest-go/blob/master/.logo/logo3.png?raw=true)
+# Yélé — Backend
 
-# LibreSpeed
+Serveur de mesure et API du projet Yélé. Il joue trois rôles :
 
-No Flash, No Java, No WebSocket, No Bullshit.
+1. **Serveur de speedtest** — fournit les points de terminaison contre lesquels
+   l'application mobile mesure le débit et la latence.
+2. **Collecteur de mesures** — reçoit les résultats de l'application mobile,
+   les enrichit et les stocke dans MongoDB.
+3. **API du tableau de bord** — expose les données agrégées consommées par le
+   site web public, et relaie le micro-service d'analyse.
 
-This is a very lightweight speed test implemented in JavaScript, using XMLHttpRequest and Web Workers.
+Ce dépôt est un **fork de [LibreSpeed speedtest-go](https://github.com/librespeed/speedtest-go)**.
+Le moteur de speedtest est celui du projet amont ; la couche MongoDB, l'API du
+tableau de bord et le proxy IA sont les ajouts Yélé.
 
-## Try it
-[Take a speed test](https://speedtest.zzz.cat)
+---
 
-## Compatibility
-All modern browsers are supported: IE11, latest Edge, latest Chrome, latest Firefox, latest Safari.
-Works with mobile versions too.
+## Le projet Yélé en un coup d'œil
 
-## Features
-* Download
-* Upload
-* Ping
-* Jitter
-* IP Address, ISP, distance from server (optional)
-* Telemetry (optional)
-* Results sharing via PNG image and JSON API (optional)
-* Multiple Points of Test (optional)
-* Compatible with PHP frontend predefined endpoints (with `.php` suffixes)
-* Supports [Proxy Protocol](https://www.haproxy.org/download/2.3/doc/proxy-protocol.txt)
-* Modern and classic UI designs with switchable interface
-* ID obfuscation for test result privacy (optional)
+| Dépôt | Rôle | Techno |
+|---|---|---|
+| `mobilefront` | Application mobile : réalise les mesures sur le terrain | Flutter / Dart |
+| **`mobiletest`** *(ce dépôt)* | Backend : speedtest, collecte, API | Go + MongoDB |
+| `new_web` | Tableau de bord public : carte, statistiques | HTML/CSS/JS |
+| `ai` | Micro-service d'analyse : anomalies et prévision | Python / FastAPI |
 
-### IP Detection
-* Client IP detection with proxy header chain support (X-Forwarded-For, X-Real-IP, Client-IP, CF-Connecting-IPv6)
-* ISP and location detection via ipinfo.io API with offline GeoIP database fallback (MaxMind .mmdb)
-* Private/special IP detection (including ULA IPv6 and CGNAT)
-* Distance calculation with human-friendly rounding
+```
+  [ Application mobile ]
+       |  POST /results/telemetry
+       v
+  [ CE DÉPÔT ] --------- stocke ---------> [ MongoDB Atlas ]
+       |                                          ^
+       |  GET /api/dashboard/*                    | lit directement
+       v                                          |
+  [ Tableau de bord web ]                   [ Service IA ]
+       |                                          ^
+       +---- GET /api/ai/*  --- proxifié par -----+
+```
 
-![Screencast](https://speedtest.zzz.cat/speedtest.webp)
+---
 
-## Server requirements
-* Any [Go supported platforms](https://github.com/golang/go/wiki/MinimumRequirements) (Go 1.21+)
-* SQLite, BoltDB, PostgreSQL, MySQL or MSSQL database to store test results (optional)
-* No external dependencies — single binary deployment
-* A fast! Internet connection
+## Prérequis
 
-## Installation
+- **Go >= 1.25**
+- Une base **MongoDB** — une instance Atlas gratuite suffit. Elle est
+  **obligatoire pour l'API du tableau de bord** : les autres backends de base de
+  données héritées de LibreSpeed (PostgreSQL, MySQL, SQLite, BoltDB, MSSQL)
+  n'implémentent pas les agrégations `/api/dashboard/*`.
 
-### Install using prebuilt binaries
+## Démarrage rapide
 
-1. Download the appropriate binary file from the [releases](https://github.com/librespeed/speedtest-go/releases/) page.
-2. Unzip the archive.
-3. Make changes to the configuration.
-4. Run the binary.
-5. Optional: Setup a systemd service file.
+```bash
+git clone <url-du-depot>
+cd mobiletest
 
-### Use Ansible for automatic installation
+go mod download
 
-You can use an Ansible role for installing speedtest-go easily. You can find the role on the [Ansible galaxy](https://galaxy.ansible.com/flymia/ansible_speedtest_go). There is a [separate repository](https://github.com/flymia/ansible-speedtest_go) for documentation about the Ansible role.
-### Compile from source
+# La chaîne de connexion ne doit JAMAIS être écrite dans settings.toml
+export SPEEDTEST_DATABASE_CONNECTION_STRING="mongodb+srv://user:motdepasse@cluster.mongodb.net/"
 
-You need Go 1.21+ to compile the binary.
+go run main.go
+```
 
-1. Clone this repository:
+Le serveur écoute sur **http://localhost:8989**.
 
-    ```
-    $ git clone https://github.com/librespeed/speedtest-go
-    ```
+Vérifier qu'il répond :
 
-2. Build
-    ```
-    # Change current working directory to the repository
-    $ cd speedtest-go
-    # Compile
-    $ go build -ldflags "-w -s" -trimpath -o speedtest main.go
-    ```
+```bash
+curl http://localhost:8989/getIP
+curl http://localhost:8989/api/dashboard/summary
+```
 
-3. Copy the `assets` directory, `settings.toml` file along with the compiled `speedtest` binary into a single directory
+Compiler un binaire :
 
-4. If you have telemetry enabled,
-    - For PostgreSQL/MySQL/MSSQL, create database and import the corresponding `.sql` file under `database/{postgresql,mysql,mssql}`
+```bash
+go build -o speedtest .
+./speedtest -c settings.toml
+```
 
-        ```
-        # assume you have already created a database named `speedtest` under current user
-        $ psql speedtest < database/postgresql/telemetry_postgresql.sql
-        ```
+## Configuration
 
-    - For embedded databases (BoltDB, SQLite), make sure to define the `database_file` path in `settings.toml`:
+La configuration se lit dans **`settings.toml`**. Les **secrets se passent par
+variables d'environnement**, avec le préfixe `SPEEDTEST_`, et ne doivent jamais
+être committés.
 
-        ```
-        database_file="speedtest.db"
-        ```
+| Variable d'environnement | Clé `settings.toml` | Rôle |
+|---|---|---|
+| `SPEEDTEST_DATABASE_CONNECTION_STRING` | `database_connection_string` | Chaîne MongoDB Atlas — **requis** |
+| `SPEEDTEST_IPINFO_API_KEY` | `ipinfo_api_key` | Clé ipinfo.io pour détecter le FAI |
+| `SPEEDTEST_STATISTICS_PASSWORD` | `statistics_password` | Mot de passe de la page `/stats` |
+| `SPEEDTEST_AI_SERVICE_URL` | `ai_service_url` | URL du service IA. **Vide = `/api/ai/*` désactivé** |
 
-    - SQLite supports WAL mode for better concurrent performance and works out of the box with no additional dependencies.
+Réglages non sensibles, dans `settings.toml` :
 
-5. Put `assets` folder under the same directory as your compiled binary.
-    - Make sure the font files and JavaScripts are in the `assets` directory
-    - You can have multiple HTML pages under `assets` directory. They can be access directly under the server root
-    (e.g. `/example-singleServer-full.html`)
-    - It's possible to have a default page mapped to `/`, simply put a file named `index.html` under `assets`
+| Clé | Défaut | Rôle |
+|---|---|---|
+| `listen_port` | `8989` | Port d'écoute |
+| `database_type` | `mongodb` | Doit rester `mongodb` pour le tableau de bord |
+| `database_name` | `yele_speedtest` | Nom de la base |
+| `redact_ip_addresses` | `false` | Anonymise les IP dès l'enregistrement |
+| `server_lat` / `server_lng` | `12` / `-1` | Position du serveur (Ouagadougou) |
 
-6. Change `settings.toml` according to your environment:
+---
 
-    ```toml
-    # bind address, use empty string to bind to all interfaces
-    bind_address="127.0.0.1"
-    # backend listen port, default is 8989
-    listen_port=8989
-    # proxy protocol port, use 0 to disable
-    proxyprotocol_port=0
-    # Server location, use zeroes to fetch from API automatically
-    server_lat=0
-    server_lng=0
-    # ipinfo.io API key, if applicable
-    ipinfo_api_key=""
-   
-    # assets directory path, defaults to `assets` in the same directory
-    # if the path cannot be found, embedded default assets will be used
-    assets_path="./assets"
+## Les points de terminaison
 
-    # password for logging into statistics page, change this to enable stats page
-    statistics_password="PASSWORD"
-    # redact IP addresses
-    redact_ip_addresses=false
+### Moteur de speedtest (hérité de LibreSpeed)
 
-    # database type for statistics data, currently supports: none, memory, bolt, sqlite, mysql, postgresql, mssql
-    # if none is specified, no telemetry/stats will be recorded, and no result PNG will be generated
-    database_type="postgresql"
-    database_hostname="localhost"
-    database_name="speedtest"
-    database_username="postgres"
-    database_password=""
+| Route | Méthode | Rôle |
+|---|---|---|
+| `/garbage` | GET | Flux de données aléatoires — mesure du débit descendant |
+| `/empty` | GET/POST | Absorbe les données — mesure du débit montant |
+| `/getIP` | GET | IP du client + informations FAI. Sert aussi de test de vie |
+| `/results/telemetry` | POST | **Réception d'une mesure** |
+| `/results` | GET | Image PNG récapitulative d'un test |
+| `/stats` | GET | Page de statistiques protégée par mot de passe |
 
-    # database port (optional, defaults to driver default; only used by mssql)
-    database_port=""
+Chaque route existe aussi sous le préfixe `/backend/`, par compatibilité avec le
+backend PHP historique de LibreSpeed.
 
-    # if you use `bolt` or `sqlite` as database, set database_file to database file location
-    database_file="speedtest.db"
+### API du tableau de bord (spécifique Yélé)
 
-    # GeoIP offline database (.mmdb format) for ISP detection fallback (optional)
-    # Leave empty to disable.
-    # geoip_database_file="country_asn.mmdb"
+| Route | Renvoie |
+|---|---|
+| `GET /api/dashboard/summary` | KPIs globaux : total, moyennes, tests du jour |
+| `GET /api/dashboard/map` | Points géolocalisés pour la carte |
+| `GET /api/dashboard/heatmap` | Points avec intensité pour la carte de chaleur |
+| `GET /api/dashboard/operators` | Statistiques agrégées par opérateur |
+| `GET /api/dashboard/stats/advanced` | Percentiles du débit (P25, P50, P75, P90) |
+| `GET /api/dashboard/timeline?days=30` | Série temporelle quotidienne |
+| `GET /api/dashboard/results?page=1&limit=20` | Résultats paginés, filtrables |
 
-    # TLS and HTTP/2 settings. TLS is required for HTTP/2
-    enable_tls=false
-    enable_http2=false
+Filtres acceptés par `/results` : `operator`, `network`, `from`, `to` (dates au
+format `YYYY-MM-DD`).
 
-    # if you use HTTP/2 or TLS, you need to prepare certificates and private keys
-    # tls_cert_file="cert.pem"
-    # tls_key_file="privkey.pem"
-    ```
+### Proxy vers le service IA
 
-## Differences between Go and PHP implementation and caveats
+`GET /api/ai/*` est relayé vers `${SPEEDTEST_AI_SERVICE_URL}/ai/*`. Si la
+variable est vide, la route n'est pas enregistrée du tout — le service IA est
+donc entièrement optionnel.
 
-- Test IDs are generated as ULID (Universally Unique Lexicographically Sortable Identifier), unlike the PHP version's auto-increment integer IDs
-- ID obfuscation is available as an optional feature — when enabled, ULIDs are obfuscated with a per-instance salt
-- The Go version ships with two built-in UI designs (classic gauges and modern CSS), switchable via `?design=new` URL parameter
-- The modern design (`index-modern.html`) supports multi-server configuration via `server-list.json` placed alongside the binary
-- Server location can be defined in settings or auto-detected at startup
-- There might be a slight delay on program start if your Internet connection is slow. That's because the program will
-attempt to fetch your current network's ISP info for distance calculation between your network and the speed test client's.
-This action will only be taken once, and cached for later use.
+---
 
-## License
-Copyright (C) 2016-2020 Federico Dossena
-Copyright (C) 2020 Maddie Zhan
+## Comprendre le modèle de données
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+### Comment les champs mobiles arrivent en base
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+C'est le point d'architecture le plus important à saisir.
 
-You should have received a copy of the GNU Lesser General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/lgpl>.
+Le schéma de LibreSpeed (`database/schema/schema.go`) ne comporte que douze
+champs génériques : ni opérateur, ni GPS, ni technologie radio. Le modifier
+aurait cassé les six autres backends de base de données.
+
+L'application mobile fait donc transiter ses champs métier **dans le champ
+`extra`**, sous forme de JSON. La fonction `toDocument()` de
+`database/mongodb/mongodb.go` déplie ce JSON en colonnes indexées au moment de
+l'insertion. C'est une extension propre, sans toucher au moteur amont.
+
+```
+Flutter  --->  extra = {"operator":"...","latitude":12.36,"cellularTech":"4G",...}
+                            |
+                    toDocument() déplie
+                            v
+MongoDB  --->  { operator: "...", latitude: 12.36, cellular_tech: "4G", ... }
+```
+
+### Protection des données personnelles
+
+Les champs `ip_address`, `isp_info`, `user_agent`, `language` et `log` sont
+stockés en base mais marqués `json:"-"` dans la structure `Document`. Ils ne
+sont **jamais** renvoyés par l'API publique du tableau de bord.
+
+Cette règle est délibérée et doit être préservée : **ajouter un champ personnel
+à la sortie JSON exposerait publiquement des données d'utilisateurs**. En cas de
+doute, marquer le champ `json:"-"`.
+
+Le corps des requêtes de télémétrie est limité à 64 Kio (`MaxBytesReader`).
+
+### Mesures actives et passives
+
+Depuis l'ajout de la collecte de couverture en arrière-plan, chaque document
+porte un champ `measurement_type` :
+
+- `"active"` — test lancé par l'utilisateur, avec mesure de débit ;
+- `"passive"` — relève automatique de couverture, **sans débit**, avec
+  `signal_dbm` et `signal_level` ;
+- vide — enregistrements antérieurs à ce champ, tous des tests actifs.
+
+Les agrégations écartent les mesures passives via les filtres `withoutPassive()`
+et `speedOnly()`. C'est indispensable : une relève sans débit ferait chuter
+artificiellement toutes les moyennes.
+
+### Convention « zéro = non mesuré »
+
+Pour les tests de streaming et de navigation, une valeur à zéro signifie **test
+non effectué**, et non « résultat nul ». Les clients doivent traiter ces deux
+cas différemment. Cette convention est respectée de bout en bout par le
+tableau de bord web.
+
+---
+
+## Structure du code
+
+```
+main.go                      Point d'entrée : config, base, serveur
+config/config.go             Chargement settings.toml + variables SPEEDTEST_*
+web/
+├── web.go                   Routeur chi, CORS, déclaration des routes
+├── helpers.go               Génération des données du test de débit
+└── getip_util.go            Détection FAI (ipinfo.io, repli GeoIP)
+results/
+├── telemetry.go             Réception des mesures + image PNG
+├── dashboard.go             Handlers HTTP de l'API tableau de bord
+├── stats.go                 Page de statistiques
+└── json.go                  Export JSON
+database/
+├── database.go              Interface commune
+├── schema/schema.go         Schéma générique LibreSpeed (12 champs)
+└── mongodb/mongodb.go       *** Cœur Yélé : modèle + agrégations ***
+```
+
+Le fichier à lire en priorité est **`database/mongodb/mongodb.go`** : il contient
+le modèle de données complet et toutes les requêtes d'agrégation.
+
+## Tests
+
+```bash
+go test ./...
+go vet ./...
+```
+
+Deux fichiers de tests existent (`results/telemetry_test.go`,
+`database/mongodb/mongodb_test.go`). La couverture reste faible : c'est un
+chantier ouvert aux contributions.
+
+## Déploiement
+
+### Docker
+
+```bash
+docker build -t yele-backend .
+docker run -p 8989:8989 \
+  -e SPEEDTEST_DATABASE_CONNECTION_STRING="mongodb+srv://..." \
+  yele-backend
+```
+
+### Render
+
+L'instance de démonstration tourne sur Render en offre gratuite, à l'adresse
+`https://mobiletest-j0c6.onrender.com`.
+
+> **Attention au démarrage à froid.** Sur l'offre gratuite, le service s'endort
+> après quinze minutes d'inactivité et met soixante à quatre-vingt-dix secondes
+> à se réveiller. Pendant ce laps de temps, Render renvoie sa propre page
+> d'erreur 502, **sans les en-têtes CORS du serveur Go**. Le navigateur signale
+> alors une « erreur CORS » qui n'en est pas une : c'est un simple délai
+> d'attente. Les clients doivent prévoir un délai long et des tentatives
+> successives.
+
+CORS est configuré en `AllowedOrigins: ["*"]` dans `web/web.go`, ce qui convient
+à une API publique en lecture seule.
+
+---
+
+## Rapport avec le projet amont
+
+Ce dépôt suit LibreSpeed speedtest-go. Les ajouts Yélé sont localisés :
+
+- `database/mongodb/` — entièrement nouveau ;
+- `results/dashboard.go` — entièrement nouveau ;
+- `web/web.go` — routes du tableau de bord et proxy IA ajoutés ;
+- `config/config.go` — clé `ai_service_url` ajoutée.
+
+Le reste est du code amont, à ne modifier qu'avec précaution pour garder la
+possibilité de synchroniser les correctifs de sécurité.
+
+La documentation d'origine de LibreSpeed est conservée dans
+**`README.librespeed.md`**.
+
+## Licence
+
+**LGPL-3.0**, héritée de LibreSpeed speedtest-go. Voir le fichier `LICENSE`.
+Toute redistribution doit respecter cette licence.
