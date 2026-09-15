@@ -17,4 +17,8 @@ COPY web/ ./web/
 
 EXPOSE 8989
 
-CMD ["./speedtest", "--asset-path", "/app/web/assets"]
+# Les assets web sont embarqués dans le binaire (go:embed) ; avec
+# assets_path="" de settings.toml, ce sont eux qui sont servis.
+# (L'ancien `--asset-path` faisait planter le conteneur au démarrage :
+# ce flag n'existe pas dans main.go, seul -c est défini.)
+CMD ["./speedtest"]
