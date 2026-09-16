@@ -14,11 +14,14 @@ WORKDIR /app
 COPY --from=build_base /build/speedtest ./
 COPY settings.toml ./
 COPY web/ ./web/
+# Seuils ARCEP (profils D1-D4, zones) : fichier de config modifiable sans
+# recompilation - cf. config/seuils.json et seuil.md a la racine du projet.
+COPY config/ ./config/
 
 EXPOSE 8989
 
-# Les assets web sont embarqués dans le binaire (go:embed) ; avec
+# Les assets web sont embarques dans le binaire (go:embed) ; avec
 # assets_path="" de settings.toml, ce sont eux qui sont servis.
-# (L'ancien `--asset-path` faisait planter le conteneur au démarrage :
-# ce flag n'existe pas dans main.go, seul -c est défini.)
+# (L'ancien `--asset-path` faisait planter le conteneur au demarrage :
+# ce flag n'existe pas dans main.go, seul -c est defini.)
 CMD ["./speedtest"]

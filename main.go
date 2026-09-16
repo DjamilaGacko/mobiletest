@@ -22,6 +22,7 @@ func main() {
 	conf := config.Load(*optConfig)
 	web.SetServerLocation(&conf)
 	results.Initialize(&conf)
+	results.LoadArcepConfig("config/seuils.json")
 	database.SetDBInfo(&conf)
 	log.Fatal(web.ListenAndServe(&conf))
 }
