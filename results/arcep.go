@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -37,6 +38,8 @@ type arcepProfile struct {
 type arcepZone struct {
 	Profile string   `json:"profile"`
 	Aliases []string `json:"aliases,omitempty"`
+	Lat     float64  `json:"lat,omitempty"`
+	Lng     float64  `json:"lng,omitempty"`
 }
 
 type arcepConfig struct {
@@ -44,6 +47,7 @@ type arcepConfig struct {
 	Source             string                  `json:"source"`
 	MethodNote         string                  `json:"method_note"`
 	MinSamplesForBadge int                     `json:"min_samples_for_badge"`
+	RadiusKm           float64                 `json:"radius_km"`
 	Profiles           map[string]arcepProfile `json:"profiles"`
 	Zones              map[string]arcepZone    `json:"zones"`
 }
@@ -130,6 +134,38 @@ func normalizeCity(s string) string {
 // du dashboard).
 func arcepRound2(f float64) float64 {
 	return math.Round(f*100) / 100
+}
+
+// resolveZoneByCoords retrouve la zone d'un point GPS : la plus proche dont
+// le centre est à moins de cfg.RadiusKm (haversine). "" si aucun.
+func resolveZoneByCoords(cfg *arcepConfig, lat, lng float64) string {
+	if lat == 0 && lng == 0 {
+		return ""
+	}
+	best := ""
+	bestKm := cfg.RadiusKm
+	for name, z := range cfg.Zones {
+		if z.Lat == 0 && z.Lng == 0 {
+			continue
+		}
+		if km := haversineKm(lat, lng, z.Lat, z.Lng); km < bestKm {
+			bestKm = km
+			best = name
+		}
+	}
+	return best
+}
+
+const earthRadiusKm = 6371.0
+
+// haversineKm : distance orthodromique entre deux points (degrés → km).
+func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
+	rad := math.Pi / 180
+	dLat := (lat2 - lat1) * rad
+	dLng := (lng2 - lng1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLng/2)*math.Sin(dLng/2)
+	return earthRadiusKm * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
 // ── Réponse de l'endpoint ────────────────────────────────────────────────────
@@ -250,6 +286,121 @@ func ArcepComparison(w http.ResponseWriter, r *http.Request) {
 		}
 		return resp.Zones[i].Zone < resp.Zones[j].Zone
 	})
+
+	jsonResponse(w, resp)
+}
+
+// ── Comparaison à la volée pour UNE mesure (écran Score de l'app) ────────────
+
+type arcepMeasureResponse struct {
+	Config struct {
+		Version int    `json:"version"`
+		Source  string `json:"source"`
+	} `json:"config"`
+	MethodNote      string  `json:"methodNote"`
+	Found           bool    `json:"found"`
+	Zone            string  `json:"zone,omitempty"`
+	Profile         string  `json:"profile,omitempty"`
+	NbMesures       int     `json:"nbMesures"`
+	AvgDownload     float64 `json:"avgDownload"`
+	AvgUpload       float64 `json:"avgUpload"`
+	SeuilDownload   float64 `json:"seuilDownload"`
+	SeuilUpload     float64 `json:"seuilUpload"`
+	DonneesLimitees bool    `json:"donneesLimitees"`
+}
+
+// ArcepMeasure répond à GET /api/arcep/measure?city=… : état ARCEP de la
+// zone d'une mesure (moyennes, nb de mesures, seuils du profil), consommé
+// par l'écran de score de l'application mobile. La ville peut arriver au
+// format ipinfo « Ville, Pays » : chaque segment est essayé tour à tour.
+// Aucune valeur de mesure ne transite — le client compare lui-même son
+// résultat au seuil renvoyé, qui reste la seule vérité (seuils.json).
+func ArcepMeasure(w http.ResponseWriter, r *http.Request) {
+	arcepMu.RLock()
+	cfg := arcepLoaded
+	aliases := arcepAliases
+	arcepMu.RUnlock()
+
+	if cfg == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "arcep config unavailable"})
+		return
+	}
+	if !mongoRequired(w) {
+		return
+	}
+
+	resp := arcepMeasureResponse{}
+	resp.Config.Version = cfg.Version
+	resp.Config.Source = cfg.Source
+	resp.MethodNote = cfg.MethodNote
+
+	city := strings.TrimSpace(r.URL.Query().Get("city"))
+
+	// 1. Rattachement par GPS (fiable, même en Wi-Fi) : l'app envoie les
+	//    coordonnées de la mesure. 2. Repli sur la ville (format ipinfo
+	//    « Ville, Pays », chaque segment essayé).
+	var zone string
+	if latS := r.URL.Query().Get("lat"); latS != "" {
+		if lngS := r.URL.Query().Get("lng"); lngS != "" {
+			lat, errLat := strconv.ParseFloat(latS, 64)
+			lng, errLng := strconv.ParseFloat(lngS, 64)
+			if errLat == nil && errLng == nil {
+				zone = resolveZoneByCoords(cfg, lat, lng)
+			}
+		}
+	}
+	if zone == "" {
+		candidates := append([]string{city}, strings.Split(city, ",")...)
+		for _, cand := range candidates {
+			cand = strings.TrimSpace(cand)
+			if cand == "" {
+				continue
+			}
+			if z, ok := aliases[normalizeCity(cand)]; ok {
+				zone = z
+				break
+			}
+		}
+	}
+	if zone == "" {
+		jsonResponse(w, resp) // found=false : la carte ne s'affichera pas
+		return
+	}
+
+	// Agrégation des villes de la base vers la zone cible (moyenne pondérée).
+	cityStats, err := database.MongoDB.FetchArcepCityStats()
+	if err != nil {
+		log.Errorf("ArcepMeasure error: %s", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	n := 0
+	var sumDl, sumUl float64
+	for _, cs := range cityStats {
+		if aliases[normalizeCity(cs.City)] != zone {
+			continue
+		}
+		n += cs.Count
+		sumDl += cs.AvgDl * float64(cs.Count)
+		sumUl += cs.AvgUl * float64(cs.Count)
+	}
+
+	z := cfg.Zones[zone]
+	prof := cfg.Profiles[z.Profile]
+	resp.Found = true
+	resp.Zone = zone
+	resp.Profile = z.Profile
+	resp.NbMesures = n
+	if n > 0 {
+		resp.AvgDownload = arcepRound2(sumDl / float64(n))
+		resp.AvgUpload = arcepRound2(sumUl / float64(n))
+	}
+	resp.SeuilDownload = prof.DownloadMbps
+	resp.SeuilUpload = prof.UploadMbps
+	resp.DonneesLimitees = n > 0 && n < cfg.MinSamplesForBadge
 
 	jsonResponse(w, resp)
 }

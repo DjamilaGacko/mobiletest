@@ -1,8 +1,9 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "ARCEP Burkina Faso — Rapport de synthèse QoS des réseaux mobiles, T1 2026 (campagne 23/02/2026 – 08/04/2026)",
   "method_note": "Comparaison simplifiée : la moyenne des mesures Yélé de la zone est comparée au seuil du profil. Ce n'est PAS la méthode ARCEP (90 % des mesures au-dessus du seuil) : le mot « conforme » ne doit jamais être affiché.",
   "min_samples_for_badge": 10,
+  "radius_km": 40,
   "profiles": {
     "D1": { "download_mbps": 0.05, "upload_mbps": 0.03 },
     "D2": { "download_mbps": 1,    "upload_mbps": 0.512 },
@@ -10,15 +11,15 @@
     "D4": { "download_mbps": 4,    "upload_mbps": 2 }
   },
   "zones": {
-    "Ouagadougou":    { "profile": "D4", "aliases": ["ouagadougou", "ouaga"] },
-    "Bobo-Dioulasso": { "profile": "D4", "aliases": ["bobo-dioulasso", "bobo"] },
-    "Koudougou":      { "profile": "D3" },
-    "Kaya":           { "profile": "D3" },
-    "Ziniaré":        { "profile": "D3", "aliases": ["ziniare", "zinie"] },
-    "Tenkodogo":      { "profile": "D3" },
-    "Garango":        { "profile": "D3" },
-    "Pouytenga":      { "profile": "D3" },
-    "Saponé":         { "profile": "D2", "aliases": ["sapone", "sapone-boulgou", "sapone-kadiogo"] },
-    "Bama":           { "profile": "D2" }
+    "Ouagadougou":    { "profile": "D4", "lat": 12.3714, "lng": -1.5197, "aliases": ["ouagadougou", "ouaga"] },
+    "Bobo-Dioulasso": { "profile": "D4", "lat": 11.1771, "lng": -4.2979, "aliases": ["bobo-dioulasso", "bobo"] },
+    "Koudougou":      { "profile": "D3", "lat": 12.2526, "lng": -2.4009 },
+    "Kaya":           { "profile": "D3", "lat": 13.0917, "lng": -1.0844 },
+    "Ziniaré":        { "profile": "D3", "lat": 12.5833, "lng": -1.3833, "aliases": ["ziniare", "zinie"] },
+    "Tenkodogo":      { "profile": "D3", "lat": 11.7800, "lng": -0.3667 },
+    "Garango":        { "profile": "D3", "lat": 11.8000, "lng": -0.5500 },
+    "Pouytenga":      { "profile": "D3", "lat": 12.2500, "lng": -0.4167 },
+    "Saponé":         { "profile": "D2", "lat": 12.2833, "lng": -1.4333, "aliases": ["sapone"] },
+    "Bama":           { "profile": "D2", "lat": 11.2333, "lng": -4.4167 }
   }
 }
