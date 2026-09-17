@@ -25,32 +25,32 @@ type MongoDB struct {
 
 // Document is the MongoDB document structure stored in the collection.
 type Document struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty"      json:"id"`
-	UUID        string             `bson:"uuid"               json:"uuid"`
-	Timestamp   time.Time          `bson:"timestamp"          json:"timestamp"`
+	ID        primitive.ObjectID `bson:"_id,omitempty"      json:"id"`
+	UUID      string             `bson:"uuid"               json:"uuid"`
+	Timestamp time.Time          `bson:"timestamp"          json:"timestamp"`
 	// Champs sensibles (PII) : stockés en base mais JAMAIS renvoyés par l'API
 	// publique du dashboard (json:"-"). Voir audit sécurité #1.
-	IPAddress   string             `bson:"ip_address"         json:"-"`
-	ISPInfo     string             `bson:"isp_info"           json:"-"`
-	Download    string             `bson:"dl"                 json:"download"`
-	Upload      string             `bson:"ul"                 json:"upload"`
-	Ping        string             `bson:"ping"               json:"ping"`
-	Jitter      string             `bson:"jitter"             json:"jitter"`
-	ExtraRaw    string             `bson:"extra_raw"          json:"-"`
-	UserAgent   string             `bson:"user_agent"         json:"-"`
-	Language    string             `bson:"language"           json:"-"`
-	Log         string             `bson:"log"                json:"-"`
+	IPAddress string `bson:"ip_address"         json:"-"`
+	ISPInfo   string `bson:"isp_info"           json:"-"`
+	Download  string `bson:"dl"                 json:"download"`
+	Upload    string `bson:"ul"                 json:"upload"`
+	Ping      string `bson:"ping"               json:"ping"`
+	Jitter    string `bson:"jitter"             json:"jitter"`
+	ExtraRaw  string `bson:"extra_raw"          json:"-"`
+	UserAgent string `bson:"user_agent"         json:"-"`
+	Language  string `bson:"language"           json:"-"`
+	Log       string `bson:"log"                json:"-"`
 	// Mobile-specific parsed fields
-	Operator    string  `bson:"operator"     json:"operator"`
-	NetworkType string  `bson:"network_type" json:"networkType"`
-	SimOperator string  `bson:"sim_operator" json:"simOperator"`
-	CellularTech string `bson:"cellular_tech" json:"cellularTech"`
-	DeviceModel string  `bson:"device_model" json:"deviceModel"`
-	Location    string  `bson:"location"     json:"location"`
-	Latitude    float64 `bson:"latitude"     json:"latitude"`
-	Longitude   float64 `bson:"longitude"    json:"longitude"`
-	QoERating   int     `bson:"qoe_rating"   json:"qoeRating"`
-	QoeSat      string  `bson:"qoe_sat"      json:"qoeSatisfaction"`
+	Operator     string  `bson:"operator"     json:"operator"`
+	NetworkType  string  `bson:"network_type" json:"networkType"`
+	SimOperator  string  `bson:"sim_operator" json:"simOperator"`
+	CellularTech string  `bson:"cellular_tech" json:"cellularTech"`
+	DeviceModel  string  `bson:"device_model" json:"deviceModel"`
+	Location     string  `bson:"location"     json:"location"`
+	Latitude     float64 `bson:"latitude"     json:"latitude"`
+	Longitude    float64 `bson:"longitude"    json:"longitude"`
+	QoERating    int     `bson:"qoe_rating"   json:"qoeRating"`
+	QoeSat       string  `bson:"qoe_sat"      json:"qoeSatisfaction"`
 	// Streaming test results (zero values = test not performed)
 	StreamingStartupMs     int     `bson:"streaming_startup_ms"     json:"streamingStartupMs"`
 	StreamingRebufferCount int     `bson:"streaming_rebuffer_count" json:"streamingRebufferCount"`
@@ -70,6 +70,14 @@ type Document struct {
 	MeasurementType string `bson:"measurement_type" json:"measurementType"`
 	SignalDbm       int    `bson:"signal_dbm"       json:"signalDbm"`
 	SignalLevel     int    `bson:"signal_level"     json:"signalLevel"`
+	// Mesures radio 4G/5G (RSRP en dBm, RSRQ en dB). Pointeurs et non entiers :
+	// ces grandeurs ne sont pas definies en 2G, 3G ni Wi-Fi, et la valeur zero
+	// de Go passerait pour un signal nul mesure. `null` dit la verite.
+	Rsrp *int `bson:"rsrp,omitempty"     json:"rsrp"`
+	Rsrq *int `bson:"rsrq,omitempty"     json:"rsrq"`
+	// Emplacement physique de la SIM ayant porte les donnees : 0 = SIM 1.
+	// Permet de verifier a posteriori que la bonne SIM a ete identifiee.
+	SimSlot *int `bson:"sim_slot,omitempty" json:"simSlot"`
 	// From ISPInfo
 	City    string `bson:"city"    json:"city"`
 	Country string `bson:"country" json:"country"`
@@ -103,6 +111,10 @@ type mobileExtra struct {
 	Type        string `json:"type"`
 	SignalDbm   int    `json:"signalDbm"`
 	SignalLevel int    `json:"signalLevel"`
+	// Mesures radio : absentes (null) hors 4G/5G, d'ou les pointeurs.
+	Rsrp    *int `json:"rsrp"`
+	Rsrq    *int `json:"rsrq"`
+	SimSlot *int `json:"simSlot"`
 }
 
 // ispInfo matches the real shape stored in the isp_info field:
@@ -141,17 +153,17 @@ type OperatorStat struct {
 }
 
 type MapPoint struct {
-	Lat         float64 `json:"lat"`
-	Lng         float64 `json:"lng"`
-	Operator    string  `json:"operator"`
-	NetworkType string  `json:"networkType"`
-	SimOperator string  `json:"simOperator"`
-	CellularTech string `json:"cellularTech"`
-	Download    float64 `json:"download"`
-	Upload      float64 `json:"upload"`
-	Ping        float64 `json:"ping"`
-	Location    string  `json:"location"`
-	Timestamp   string  `json:"timestamp"`
+	Lat          float64 `json:"lat"`
+	Lng          float64 `json:"lng"`
+	Operator     string  `json:"operator"`
+	NetworkType  string  `json:"networkType"`
+	SimOperator  string  `json:"simOperator"`
+	CellularTech string  `json:"cellularTech"`
+	Download     float64 `json:"download"`
+	Upload       float64 `json:"upload"`
+	Ping         float64 `json:"ping"`
+	Location     string  `json:"location"`
+	Timestamp    string  `json:"timestamp"`
 	// Streaming & browsing metrics (zero = test not performed)
 	StreamingScore         float64 `json:"streamingScore"`
 	StreamingMaxResolution string  `json:"streamingMaxResolution"`
@@ -495,17 +507,17 @@ func (m *MongoDB) FetchMapPoints() ([]MapPoint, error) {
 		ul, _ := strconv.ParseFloat(doc.Upload, 64)
 		ping, _ := strconv.ParseFloat(doc.Ping, 64)
 		points = append(points, MapPoint{
-			Lat:          doc.Latitude,
-			Lng:          doc.Longitude,
-			Operator:     doc.Operator,
-			NetworkType:  doc.NetworkType,
-			SimOperator:  doc.SimOperator,
-			CellularTech: doc.CellularTech,
-			Download:     round2(dl),
-			Upload:      round2(ul),
-			Ping:        round2(ping),
-			Location:    doc.Location,
-			Timestamp:   doc.Timestamp.Format("02/01/2006 15:04"),
+			Lat:                    doc.Latitude,
+			Lng:                    doc.Longitude,
+			Operator:               doc.Operator,
+			NetworkType:            doc.NetworkType,
+			SimOperator:            doc.SimOperator,
+			CellularTech:           doc.CellularTech,
+			Download:               round2(dl),
+			Upload:                 round2(ul),
+			Ping:                   round2(ping),
+			Location:               doc.Location,
+			Timestamp:              doc.Timestamp.Format("02/01/2006 15:04"),
 			StreamingScore:         round2(doc.StreamingScore),
 			StreamingMaxResolution: doc.StreamingMaxResolution,
 			StreamingRebufferRatio: round2(doc.StreamingRebufferRatio),
@@ -710,6 +722,9 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 			doc.BrowsingScore = extra.BrowsingScore
 			doc.SignalDbm = extra.SignalDbm
 			doc.SignalLevel = extra.SignalLevel
+			doc.Rsrp = extra.Rsrp
+			doc.Rsrq = extra.Rsrq
+			doc.SimSlot = extra.SimSlot
 			// Un `extra` sans type explicite provient d'une version antérieure
 			// de l'application mobile : c'était nécessairement un test actif.
 			doc.MeasurementType = extra.Type
