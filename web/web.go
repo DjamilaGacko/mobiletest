@@ -94,6 +94,7 @@ func ListenAndServe(conf *config.Config) error {
 	r.Get(conf.BaseURL+"/api/dashboard/stats/advanced", results.DashboardAdvancedStats)
 	r.Get(conf.BaseURL+"/api/arcep/comparison", results.ArcepComparison)
 	r.Get(conf.BaseURL+"/api/arcep/measure", results.ArcepMeasure)
+	r.Post(conf.BaseURL+"/api/arcep/measure/batch", results.ArcepMeasureBatch)
 
 	// Proxy vers le micro-service IA (prédiction + détection d'anomalies).
 	// /api/ai/anomalies -> <ai_service_url>/ai/anomalies

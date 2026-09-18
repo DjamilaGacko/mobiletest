@@ -1,14 +1,17 @@
 // Package arcep (fichier) implémente le module « Comparaison ARCEP » de Yélé.
 //
-// Les seuils officiels (profils D1–D4, zones du rapport) ne vivent PAS dans le
-// code : ils sont lus depuis config/seuils.json, monté en volume dans Docker.
-// Modifier un seuil = éditer le JSON + redémarrer le backend + committer le
-// fichier. Voir seuil.md à la racine du projet pour la conception complète.
+// Les seuils officiels (profils D1–D4, zones du rapport, QoS navigation/
+// streaming) ne vivent PAS dans le code : ils sont lus depuis
+// config/seuils.json, monté en volume dans Docker. Modifier un seuil =
+// éditer le JSON + redémarrer le backend + committer le fichier. Voir
+// seuil.md à la racine du projet pour la conception complète.
 //
 // Règle d'honnêteté (cf. seuils.md métier) : la comparaison est SIMPLIFIÉE
-// (moyenne vs seuil), pas la méthode ARCEP officielle (90 % des mesures au-
-// dessus du seuil). L'API ne renvoie donc jamais de « conforme » — uniquement
-// des faits (auDessus: true/false) que le dashboard affiche tels quels.
+// (moyenne vs seuil pour le débit ; valeur du test vs seuil pour la QoS),
+// pas la méthode ARCEP officielle (90 % des mesures au-dessus du seuil).
+// L'API ne renvoie donc jamais de « conforme » — uniquement des faits
+// (auDessus: true/false, dansSeuil: true/false) que les clients affichent
+// tels quels.
 package results
 
 import (
@@ -42,12 +45,34 @@ type arcepZone struct {
 	Lng     float64  `json:"lng,omitempty"`
 }
 
+// arcepQos porte les seuils QoS nationaux (navigation web / streaming vidéo),
+// ajoutés en v3 — cf. seuil.md §9.
+type arcepQos struct {
+	Navigation struct {
+		PageLoadS   float64 `json:"page_load_s"`
+		PageLoadPct float64 `json:"page_load_pct"`
+		ConnectionS float64 `json:"connection_s"`
+		TransferPct float64 `json:"transfer_pct"`
+		Source      string  `json:"source"`
+	} `json:"navigation"`
+	Streaming struct {
+		PreloadS   float64 `json:"preload_s"`
+		QualityPct float64 `json:"quality_pct"`
+	} `json:"streaming"`
+	QualiteVideo struct {
+		RebufferRatioMax float64 `json:"rebuffer_ratio_max"`
+		ResolutionMin    string  `json:"resolution_min"`
+		InterruptionsMax int     `json:"interruptions_max"`
+	} `json:"qualite_video"`
+}
+
 type arcepConfig struct {
 	Version            int                     `json:"version"`
 	Source             string                  `json:"source"`
 	MethodNote         string                  `json:"method_note"`
 	MinSamplesForBadge int                     `json:"min_samples_for_badge"`
 	RadiusKm           float64                 `json:"radius_km"`
+	Qos                *arcepQos               `json:"qos,omitempty"`
 	Profiles           map[string]arcepProfile `json:"profiles"`
 	Zones              map[string]arcepZone    `json:"zones"`
 }
@@ -168,7 +193,7 @@ func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	return earthRadiusKm * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
-// ── Réponse de l'endpoint ────────────────────────────────────────────────────
+// ── Réponse de l'endpoint de comparaison (dashboard) ─────────────────────────
 
 type arcepDirection struct {
 	Moyenne  float64 `json:"moyenne"`
@@ -195,7 +220,38 @@ type arcepResponse struct {
 	HorsZone   int               `json:"horsZone"`
 }
 
-// ── Endpoint ─────────────────────────────────────────────────────────────────
+// ── Réponses de la QoS (navigation web / streaming vidéo, seuils nationaux) ──
+
+// arcepQosNavigation : verdict QoS du test individuel sur la navigation.
+type arcepQosNavigation struct {
+	PageLoadS       float64 `json:"pageLoadS"`       // chargement moyen de CE test
+	PageLoadSeuilS  float64 `json:"pageLoadSeuilS"`  // seuil ARCEP (national)
+	DansSeuil       bool    `json:"dansSeuil"`
+	ConnectionSeuil float64 `json:"connectionSeuil"` // référence affichée (v2 : mesuré)
+	Source          string  `json:"source"`
+}
+
+// arcepQosStreaming : verdict QoS du test individuel sur le streaming.
+type arcepQosStreaming struct {
+	PreloadS      float64 `json:"preloadS"`      // préchargement de CE test
+	PreloadSeuilS float64 `json:"preloadSeuilS"` // seuil ARCEP (national)
+	DansSeuil     bool    `json:"dansSeuil"`
+	// Bonne session : définition Yélé (jamais présentée comme définition ARCEP).
+	BonneSession        bool    `json:"bonneSession"`
+	RebufferRatio       float64 `json:"rebufferRatio"`
+	RebufferRatioMax    float64 `json:"rebufferRatioMax"`
+	ResolutionMin       string  `json:"resolutionMin"`
+	Interruptions       int     `json:"interruptions"`
+	InterruptionsMax    int     `json:"interruptionsMax"`
+	QualityPctReference float64 `json:"qualityPctReference"` // taux de campagne ARCEP (référence uniquement)
+}
+
+type arcepQosBlock struct {
+	Navigation *arcepQosNavigation `json:"navigation,omitempty"`
+	Streaming  *arcepQosStreaming  `json:"streaming,omitempty"`
+}
+
+// ── Endpoint : comparaison par zone (dashboard) ──────────────────────────────
 
 // ArcepComparison répond à GET /api/arcep/comparison : moyennes de débit par
 // zone jointes aux seuils du profil (config/seuils.json). Plusieurs libellés
@@ -297,22 +353,53 @@ type arcepMeasureResponse struct {
 		Version int    `json:"version"`
 		Source  string `json:"source"`
 	} `json:"config"`
-	MethodNote      string  `json:"methodNote"`
-	Found           bool    `json:"found"`
-	Zone            string  `json:"zone,omitempty"`
-	Profile         string  `json:"profile,omitempty"`
-	NbMesures       int     `json:"nbMesures"`
-	AvgDownload     float64 `json:"avgDownload"`
-	AvgUpload       float64 `json:"avgUpload"`
-	SeuilDownload   float64 `json:"seuilDownload"`
-	SeuilUpload     float64 `json:"seuilUpload"`
-	DonneesLimitees bool    `json:"donneesLimitees"`
+	MethodNote      string         `json:"methodNote"`
+	Found           bool           `json:"found"`
+	Zone            string         `json:"zone,omitempty"`
+	Profile         string         `json:"profile,omitempty"`
+	NbMesures       int            `json:"nbMesures"`
+	AvgDownload     float64        `json:"avgDownload"`
+	AvgUpload       float64        `json:"avgUpload"`
+	SeuilDownload   float64        `json:"seuilDownload"`
+	SeuilUpload     float64        `json:"seuilUpload"`
+	DonneesLimitees bool           `json:"donneesLimitees"`
+	Qos             arcepQosBlock  `json:"qos"`
 }
 
-// ArcepMeasure répond à GET /api/arcep/measure?city=… : état ARCEP de la
-// zone d'une mesure (moyennes, nb de mesures, seuils du profil), consommé
-// par l'écran de score de l'application mobile. La ville peut arriver au
-// format ipinfo « Ville, Pays » : chaque segment est essayé tour à tour.
+// resolveZone renvoie la zone d'une requête : par GPS (lat/lng, fiable même
+// en Wi-Fi) puis repli sur la ville (format ipinfo « Ville, Pays », chaque
+// segment essayé).
+func resolveZone(cfg *arcepConfig, aliases map[string]string, r *http.Request) string {
+	if latS := r.URL.Query().Get("lat"); latS != "" {
+		if lngS := r.URL.Query().Get("lng"); lngS != "" {
+			lat, errLat := strconv.ParseFloat(latS, 64)
+			lng, errLng := strconv.ParseFloat(lngS, 64)
+			if errLat == nil && errLng == nil {
+				if z := resolveZoneByCoords(cfg, lat, lng); z != "" {
+					return z
+				}
+			}
+		}
+	}
+	city := strings.TrimSpace(r.URL.Query().Get("city"))
+	candidates := append([]string{city}, strings.Split(city, ",")...)
+	for _, cand := range candidates {
+		cand = strings.TrimSpace(cand)
+		if cand == "" {
+			continue
+		}
+		if z, ok := aliases[normalizeCity(cand)]; ok {
+			return z
+		}
+	}
+	return ""
+}
+
+// ArcepMeasure répond à GET /api/arcep/measure : état ARCEP de la zone d'une
+// mesure (moyennes, nb de mesures, seuils du profil) + seuils QoS nationaux,
+// consommé par l'écran de score de l'application mobile. Le bloc qos est
+// renvoyé même quand found=false : les seuils navigation/streaming sont
+// nationaux et ne dépendent pas de la zone.
 // Aucune valeur de mesure ne transite — le client compare lui-même son
 // résultat au seuil renvoyé, qui reste la seule vérité (seuils.json).
 func ArcepMeasure(w http.ResponseWriter, r *http.Request) {
@@ -336,36 +423,26 @@ func ArcepMeasure(w http.ResponseWriter, r *http.Request) {
 	resp.Config.Source = cfg.Source
 	resp.MethodNote = cfg.MethodNote
 
-	city := strings.TrimSpace(r.URL.Query().Get("city"))
+	// Bloc QoS : toujours renvoyé (seuils nationaux), verdicts calculés par
+	// le client avec les valeurs de SON test.
+	if cfg.Qos != nil {
+		resp.Qos.Navigation = &arcepQosNavigation{
+			PageLoadSeuilS:  cfg.Qos.Navigation.PageLoadS,
+			ConnectionSeuil: cfg.Qos.Navigation.ConnectionS,
+			Source:          cfg.Qos.Navigation.Source,
+		}
+		resp.Qos.Streaming = &arcepQosStreaming{
+			PreloadSeuilS:       cfg.Qos.Streaming.PreloadS,
+			RebufferRatioMax:    cfg.Qos.QualiteVideo.RebufferRatioMax,
+			ResolutionMin:       cfg.Qos.QualiteVideo.ResolutionMin,
+			InterruptionsMax:    cfg.Qos.QualiteVideo.InterruptionsMax,
+			QualityPctReference: cfg.Qos.Streaming.QualityPct,
+		}
+	}
 
-	// 1. Rattachement par GPS (fiable, même en Wi-Fi) : l'app envoie les
-	//    coordonnées de la mesure. 2. Repli sur la ville (format ipinfo
-	//    « Ville, Pays », chaque segment essayé).
-	var zone string
-	if latS := r.URL.Query().Get("lat"); latS != "" {
-		if lngS := r.URL.Query().Get("lng"); lngS != "" {
-			lat, errLat := strconv.ParseFloat(latS, 64)
-			lng, errLng := strconv.ParseFloat(lngS, 64)
-			if errLat == nil && errLng == nil {
-				zone = resolveZoneByCoords(cfg, lat, lng)
-			}
-		}
-	}
+	zone := resolveZone(cfg, aliases, r)
 	if zone == "" {
-		candidates := append([]string{city}, strings.Split(city, ",")...)
-		for _, cand := range candidates {
-			cand = strings.TrimSpace(cand)
-			if cand == "" {
-				continue
-			}
-			if z, ok := aliases[normalizeCity(cand)]; ok {
-				zone = z
-				break
-			}
-		}
-	}
-	if zone == "" {
-		jsonResponse(w, resp) // found=false : la carte ne s'affichera pas
+		jsonResponse(w, resp) // found=false : le bloc débit ne s'affichera pas
 		return
 	}
 
@@ -403,4 +480,141 @@ func ArcepMeasure(w http.ResponseWriter, r *http.Request) {
 	resp.DonneesLimitees = n > 0 && n < cfg.MinSamplesForBadge
 
 	jsonResponse(w, resp)
+}
+
+// ── Comparaison en lot pour l'Historique de l'app ────────────────────────────
+
+// arcepBatchItem : verdict pour un test de l'historique. Chaque bloc (debit,
+// navigation, streaming) n'est présent que si le composant a réellement été
+// mesuré — l'app affichera une ligne par bloc présent (3 lignes test complet,
+// 1 ligne test indépendant).
+type arcepBatchItem struct {
+	ID         string         `json:"id"`
+	Found      bool           `json:"found"`
+	Zone       string         `json:"zone,omitempty"`
+	Profile    string         `json:"profile,omitempty"`
+	SeuilDL    float64        `json:"seuilDownload,omitempty"`
+	SeuilUL    float64        `json:"seuilUpload,omitempty"`
+	NbMesures  int            `json:"nbMesures,omitempty"`
+	Debit      *arcepQosBlock `json:"-"` // réservé : verdict débit calculé côté client
+	Qos        arcepQosBlock  `json:"qos"`
+	NonComparé string         `json:"nonCompare,omitempty"` // motif quand aucun bloc débit
+}
+
+// ArcepMeasureBatch répond à POST /api/arcep/measure/batch : résolution de
+// zone (GPS → ville) pour une liste de tests de l'historique, en UNE requête.
+// Le corps attendu :
+//
+//	{"tests":[{"id":"…","lat":12.33,"lng":-1.54,"city":"Ouaga, Burkina Faso"}]}
+//
+// Chaque item renvoie la zone + les seuils ; les comparaisons (au-dessus /
+// dans le seuil) restent calculées côté client avec les valeurs du test —
+// le serveur ne connaît jamais les résultats individuels.
+func ArcepMeasureBatch(w http.ResponseWriter, r *http.Request) {
+	arcepMu.RLock()
+	cfg := arcepLoaded
+	aliases := arcepAliases
+	arcepMu.RUnlock()
+
+	if cfg == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "arcep config unavailable"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !mongoRequired(w) {
+		return
+	}
+
+	var body struct {
+		Tests []struct {
+			ID   string  `json:"id"`
+			Lat  float64 `json:"lat"`
+			Lng  float64 `json:"lng"`
+			City string  `json:"city"`
+		} `json:"tests"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if len(body.Tests) > 500 {
+		body.Tests = body.Tests[:500] // garde-fou : l'historique local est borné
+	}
+
+	// Seuils du profil par zone résolus une fois pour toutes les requêtes.
+	type zoneSeuils struct {
+		profile string
+		dl, ul  float64
+	}
+	seuilsParZone := make(map[string]zoneSeuils, len(cfg.Zones))
+	for name, z := range cfg.Zones {
+		p := cfg.Profiles[z.Profile]
+		seuilsParZone[name] = zoneSeuils{profile: z.Profile, dl: p.DownloadMbps, ul: p.UploadMbps}
+	}
+
+	items := make([]arcepBatchItem, 0, len(body.Tests))
+	for _, t := range body.Tests {
+		item := arcepBatchItem{ID: t.ID}
+
+		// QoS : renvoyé pour chaque item — les blocs navigation/streaming
+		// s'afficheront dès lors que le composant a été mesuré, même hors zone.
+		if cfg.Qos != nil {
+			item.Qos.Navigation = &arcepQosNavigation{
+				PageLoadSeuilS:  cfg.Qos.Navigation.PageLoadS,
+				ConnectionSeuil: cfg.Qos.Navigation.ConnectionS,
+				Source:          cfg.Qos.Navigation.Source,
+			}
+			item.Qos.Streaming = &arcepQosStreaming{
+				PreloadSeuilS:       cfg.Qos.Streaming.PreloadS,
+				RebufferRatioMax:    cfg.Qos.QualiteVideo.RebufferRatioMax,
+				ResolutionMin:       cfg.Qos.QualiteVideo.ResolutionMin,
+				InterruptionsMax:    cfg.Qos.QualiteVideo.InterruptionsMax,
+				QualityPctReference: cfg.Qos.Streaming.QualityPct,
+			}
+		}
+
+		// Résolution de zone : GPS d'abord (le corps porte lat/lng), repli
+		// ville (même logique ipinfo que l'endpoint unitaire).
+		zone := ""
+		if t.Lat != 0 || t.Lng != 0 {
+			zone = resolveZoneByCoords(cfg, t.Lat, t.Lng)
+		}
+		if zone == "" {
+			candidates := append([]string{t.City}, strings.Split(t.City, ",")...)
+			for _, cand := range candidates {
+				cand = strings.TrimSpace(cand)
+				if cand == "" {
+					continue
+				}
+				if z, ok := aliases[normalizeCity(cand)]; ok {
+					zone = z
+					break
+				}
+			}
+		}
+
+		if zone == "" {
+			item.NonComparé = "hors zone"
+			items = append(items, item)
+			continue
+		}
+
+		s := seuilsParZone[zone]
+		item.Found = true
+		item.Zone = zone
+		item.Profile = s.profile
+		item.SeuilDL = s.dl
+		item.SeuilUL = s.ul
+		items = append(items, item)
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"config": map[string]interface{}{"version": cfg.Version, "source": cfg.Source},
+		"items":  items,
+	})
 }

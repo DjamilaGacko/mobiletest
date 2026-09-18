@@ -1,9 +1,28 @@
 {
-  "version": 2,
+  "version": 3,
   "source": "ARCEP Burkina Faso — Rapport de synthèse QoS des réseaux mobiles, T1 2026 (campagne 23/02/2026 – 08/04/2026)",
   "method_note": "Comparaison simplifiée : la moyenne des mesures Yélé de la zone est comparée au seuil du profil. Ce n'est PAS la méthode ARCEP (90 % des mesures au-dessus du seuil) : le mot « conforme » ne doit jamais être affiché.",
   "min_samples_for_badge": 10,
   "radius_km": 40,
+  "qos": {
+    "navigation": {
+      "page_load_s": 30,
+      "page_load_pct": 95,
+      "connection_s": 20,
+      "transfer_pct": 95,
+      "source": "ARCEP Burkina Faso - presentation QoS du 29/05/2026 (obligations des cahiers des charges)"
+    },
+    "streaming": {
+      "preload_s": 5,
+      "quality_pct": 95
+    },
+    "qualite_video": {
+      "_commentaire": "Definition Yele d'une session video de bonne qualite - le document ARCEP ne definit pas la bonne qualite. Ne jamais presenter comme definition ARCEP.",
+      "rebuffer_ratio_max": 0.10,
+      "resolution_min": "480p",
+      "interruptions_max": 0
+    }
+  },
   "profiles": {
     "D1": { "download_mbps": 0.05, "upload_mbps": 0.03 },
     "D2": { "download_mbps": 1,    "upload_mbps": 0.512 },
