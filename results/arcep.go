@@ -69,6 +69,7 @@ type arcepQos struct {
 type arcepConfig struct {
 	Version            int                     `json:"version"`
 	Source             string                  `json:"source"`
+	Periode            string                  `json:"periode"`
 	MethodNote         string                  `json:"method_note"`
 	MinSamplesForBadge int                     `json:"min_samples_for_badge"`
 	RadiusKm           float64                 `json:"radius_km"`
@@ -214,6 +215,7 @@ type arcepResponse struct {
 	Config struct {
 		Version int    `json:"version"`
 		Source  string `json:"source"`
+		Periode string `json:"periode,omitempty"`
 	} `json:"config"`
 	MethodNote string            `json:"methodNote"`
 	Zones      []arcepZoneResult `json:"zones"`
@@ -303,6 +305,7 @@ func ArcepComparison(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Config.Version = cfg.Version
 	resp.Config.Source = cfg.Source
+	resp.Config.Periode = cfg.Periode
 	resp.HorsZone = horsZone
 
 	for canonical, z := range cfg.Zones {
@@ -352,6 +355,7 @@ type arcepMeasureResponse struct {
 	Config struct {
 		Version int    `json:"version"`
 		Source  string `json:"source"`
+		Periode string `json:"periode,omitempty"`
 	} `json:"config"`
 	MethodNote      string         `json:"methodNote"`
 	Found           bool           `json:"found"`
@@ -421,6 +425,7 @@ func ArcepMeasure(w http.ResponseWriter, r *http.Request) {
 	resp := arcepMeasureResponse{}
 	resp.Config.Version = cfg.Version
 	resp.Config.Source = cfg.Source
+	resp.Config.Periode = cfg.Periode
 	resp.MethodNote = cfg.MethodNote
 
 	// Bloc QoS : toujours renvoyé (seuils nationaux), verdicts calculés par
@@ -614,7 +619,7 @@ func ArcepMeasureBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, map[string]interface{}{
-		"config": map[string]interface{}{"version": cfg.Version, "source": cfg.Source},
+		"config": map[string]interface{}{"version": cfg.Version, "source": cfg.Source, "periode": cfg.Periode},
 		"items":  items,
 	})
 }
