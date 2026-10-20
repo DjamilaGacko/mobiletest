@@ -140,3 +140,6 @@ dist/
 # Le workspace multi-depots de Yele vit AU-DESSUS des depots, jamais dedans.
 *.code-workspace
 .vscode/
+
+# Secrets locaux — jamais versionnés
+.env

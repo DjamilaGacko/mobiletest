@@ -1,0 +1,31 @@
+name: yele-build
+
+# Contrôle de compilation : voir docs/CONTRIBUTING-equipe.md §1.3 (CI obligatoire).
+# Ne tourne que sur les pull requests, comme le garde-fou.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Go (version du go.mod)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compilation
+        run: go build ./...
+
+      - name: Vérifications statiques
+        run: go vet ./...
+
+      - name: Tests unitaires
+        run: go test ./...

@@ -46,6 +46,9 @@ type Document struct {
 	SimOperator string  `bson:"sim_operator" json:"simOperator"`
 	CellularTech string `bson:"cellular_tech" json:"cellularTech"`
 	DeviceModel string  `bson:"device_model" json:"deviceModel"`
+	// IMP-13 : UUID d'appareil anonyme et stable, généré par l'app. Permet le
+	// suivi longitudinal des mesures par appareil sans aucune donnée privée.
+	DeviceID    string  `bson:"device_id"    json:"deviceId"`
 	Location    string  `bson:"location"     json:"location"`
 	Latitude    float64 `bson:"latitude"     json:"latitude"`
 	Longitude   float64 `bson:"longitude"    json:"longitude"`
@@ -82,6 +85,7 @@ type mobileExtra struct {
 	SimOperator     string  `json:"simOperator"`
 	CellularTech    string  `json:"cellularTech"`
 	DeviceModel     string  `json:"deviceModel"`
+	DeviceID        string  `json:"deviceId"`
 	Location        string  `json:"location"`
 	Latitude        float64 `json:"latitude"`
 	Longitude       float64 `json:"longitude"`
@@ -663,6 +667,84 @@ func (m *MongoDB) FetchAdvancedStats() ([]OperatorAdvancedStats, error) {
 	return result, nil
 }
 
+// ── Baromètre (IMP-09) ────────────────────────────────────────────────────────
+
+// BarometerResult situe un résultat de test dans la base des mesures passées.
+type BarometerResult struct {
+	DownloadPercentile float64       `json:"downloadPercentile"`
+	UploadPercentile   float64       `json:"uploadPercentile"`
+	PingPercentile     float64       `json:"pingPercentile"`
+	SampleSize         int64         `json:"sampleSize"`
+	Operators          []OperatorStat `json:"operators"`
+}
+
+// FetchBarometer calcule la position relative d'un résultat (débits en Mb/s,
+// latence en ms) par rapport à l'ensemble des mesures actives abouties, et
+// renvoie le classement des opérateurs par débit moyen.
+//
+// Le centile est la part des mesures « battues » par le résultat testé :
+// un downloadPercentile de 80 signifie que le résultat est plus rapide que
+// 80 % des mesures de la base. La latence est inversée : plus elle est
+// basse, meilleur est le résultat. Le calcul est fait côté application Go
+// sur un échantillon des 5000 dernières mesures actives abouties : c'est
+// largement suffisant pour un baromètre grand public et cela évite un
+// pipeline d'agrégation complexe difficile à tester.
+func (m *MongoDB) FetchBarometer(download, upload, ping float64) (*BarometerResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	filter := speedOnly(bson.M{})
+	opts := options.Find().
+		SetSort(bson.D{{Key: "timestamp", Value: -1}}).
+		SetLimit(5000).
+		SetProjection(bson.M{"dl": 1, "ul": 1, "ping": 1})
+	cursor, err := m.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var docs []Document
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+
+	dlBetter, ulBetter, pingBetter := 0, 0, 0
+	for _, d := range docs {
+		dl, _ := strconv.ParseFloat(d.Download, 64)
+		ul, _ := strconv.ParseFloat(d.Upload, 64)
+		pg, _ := strconv.ParseFloat(d.Ping, 64)
+		if dl < download {
+			dlBetter++
+		}
+		if ul < upload {
+			ulBetter++
+		}
+		if pg > ping {
+			pingBetter++
+		}
+	}
+
+	n := float64(len(docs))
+	res := &BarometerResult{SampleSize: int64(len(docs))}
+	if n > 0 {
+		res.DownloadPercentile = round2(float64(dlBetter) / n * 100)
+		res.UploadPercentile = round2(float64(ulBetter) / n * 100)
+		res.PingPercentile = round2(float64(pingBetter) / n * 100)
+	}
+
+	// Classement des opérateurs, réutilise l'agrégation existante (déjà triée
+	// par nombre de tests ; on la re-trie par débit moyen ici).
+	ops, err := m.FetchOperatorStats()
+	if err == nil {
+		sort.Slice(ops, func(i, j int) bool {
+			return ops[i].AvgDownload > ops[j].AvgDownload
+		})
+		res.Operators = ops
+	}
+	return res, nil
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
@@ -694,6 +776,7 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 			doc.SimOperator = extra.SimOperator
 			doc.CellularTech = extra.CellularTech
 			doc.DeviceModel = extra.DeviceModel
+			doc.DeviceID = extra.DeviceID
 			doc.Location = extra.Location
 			doc.Latitude = extra.Latitude
 			doc.Longitude = extra.Longitude

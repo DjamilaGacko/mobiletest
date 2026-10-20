@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: yele-backend
+    runtime: go
+    repo: https://github.com/yele-bf/mobiletest
+    branch: main
+    buildCommand: go build -o speedtest .
+    startCommand: ./speedtest --asset-path web/assets
+    envVars:
+      - key: SPEEDTEST_DATABASE_TYPE
+        value: mongodb
+      - key: SPEEDTEST_DATABASE_NAME
+        value: yele_speedtest
+      - key: SPEEDTEST_DATABASE_CONNECTION_STRING
+        value: mongodb+srv://yelebf_db_user:47hArVkmjrEoaCIy@yele.q3ptla3.mongodb.net/?appName=yele
+    autoDeploy: true
+    region: frankfurt
