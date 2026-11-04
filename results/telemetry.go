@@ -223,6 +223,15 @@ func Record(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// IMP-03 : mesure envoyée par un utilisateur connecté, rattachée à son
+	// compte. Un jeton absent ou expiré n'empêche jamais l'enregistrement : la
+	// mesure reste simplement anonyme.
+	if u := UserFromRequest(r); u != nil {
+		if err := database.MongoDB.AttachResult(record.UUID, u.ID); err != nil {
+			log.Warnf("Error attaching result to account: %s", err)
+		}
+	}
+
 	responseID := uuid.String()
 	if config.LoadedConfig().EnableIDObfuscation {
 		responseID = ObfuscateULID(uuid.String())

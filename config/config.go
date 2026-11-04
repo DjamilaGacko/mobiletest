@@ -36,6 +36,10 @@ type Config struct {
 	// Vide = fonctionnalité désactivée.
 	AIServiceURL string `mapstructure:"ai_service_url"`
 
+	// Seul accès au tableau de bord web. Vide = personne ne peut se connecter.
+	DashboardEmail    string `mapstructure:"dashboard_email"`
+	DashboardPassword string `mapstructure:"dashboard_password"`
+
 	EnableHTTP2 bool   `mapstructure:"enable_http2"`
 	EnableTLS   bool   `mapstructure:"enable_tls"`
 	TLSCertFile string `mapstructure:"tls_cert_file"`
@@ -73,6 +77,8 @@ func init() {
 	_ = viper.BindEnv("statistics_password")
 	_ = viper.BindEnv("database_connection_string")
 	_ = viper.BindEnv("ai_service_url")
+	_ = viper.BindEnv("dashboard_email")
+	_ = viper.BindEnv("dashboard_password")
 }
 
 func Load(configPath string) Config {

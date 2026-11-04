@@ -37,6 +37,11 @@ database_name="yele_speedtest"
 # Exemple local : ai_service_url="http://localhost:8000"
 ai_service_url=""
 
+# Seul accès au tableau de bord web. À définir via SPEEDTEST_DASHBOARD_EMAIL et
+# SPEEDTEST_DASHBOARD_PASSWORD sur Render, jamais ici. Vide = accès impossible.
+dashboard_email=""
+dashboard_password=""
+
 # Legacy SQL settings (unused when database_type="mongodb")
 database_hostname=""
 database_username=""

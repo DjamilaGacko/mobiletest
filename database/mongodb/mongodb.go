@@ -21,6 +21,9 @@ import (
 type MongoDB struct {
 	client     *mongo.Client
 	collection *mongo.Collection
+	// Comptes utilisateurs (IMP-03) : profils et sessions ouvertes.
+	users    *mongo.Collection
+	sessions *mongo.Collection
 }
 
 // Document is the MongoDB document structure stored in the collection.
@@ -62,14 +65,8 @@ type Document struct {
 	BrowsingSuccessRate float64 `bson:"browsing_success_rate" json:"browsingSuccessRate"`
 	BrowsingPagesTested int     `bson:"browsing_pages_tested" json:"browsingPagesTested"`
 	BrowsingScore       float64 `bson:"browsing_score"        json:"browsingScore"`
-	// Mesure passive (collecte de couverture en arrière-plan).
-	// MeasurementType vaut "active" pour un test lancé par l'utilisateur et
-	// "passive" pour une relève automatique sans speedtest. Vide pour les
-	// enregistrements antérieurs à l'introduction du champ : ils sont tous
-	// des tests actifs.
-	MeasurementType string `bson:"measurement_type" json:"measurementType"`
-	SignalDbm       int    `bson:"signal_dbm"       json:"signalDbm"`
-	SignalLevel     int    `bson:"signal_level"     json:"signalLevel"`
+	// Puissance générale du signal (dBm), toutes technologies confondues.
+	SignalDbm int `bson:"signal_dbm" json:"signalDbm"`
 	// Mesures radio 4G/5G (RSRP en dBm, RSRQ en dB). Pointeurs et non entiers :
 	// ces grandeurs ne sont pas definies en 2G, 3G ni Wi-Fi, et la valeur zero
 	// de Go passerait pour un signal nul mesure. `null` dit la verite.
@@ -78,6 +75,18 @@ type Document struct {
 	// Emplacement physique de la SIM ayant porte les donnees : 0 = SIM 1.
 	// Permet de verifier a posteriori que la bonne SIM a ete identifiee.
 	SimSlot *int `bson:"sim_slot,omitempty" json:"simSlot"`
+	// Adresse textuelle deduite du GPS par l'application (ISS-10) : rue,
+	// quartier, ville. Plus precise que Location, qui vient de l'IP.
+	Address string `bson:"address,omitempty" json:"address"`
+	// Empreinte anonyme et stable de l'appareil (IMP-15) : relie les mesures
+	// d'un meme telephone sans compte ni donnee personnelle.
+	DeviceID string `bson:"device_id,omitempty" json:"deviceId"`
+	// Donnees consommees par la mesure, octets recus + envoyes (IMP-01).
+	// Pointeur : nil = non mesurable (iOS), distinct d'une consommation nulle.
+	DataUsedBytes *int64 `bson:"data_used_bytes,omitempty" json:"dataUsedBytes"`
+	// Compte auquel la mesure est rattachee (IMP-03), vide pour une mesure
+	// anonyme. Jamais expose par l'API publique du dashboard.
+	UserID string `bson:"user_id,omitempty" json:"-"`
 	// From ISPInfo
 	City    string `bson:"city"    json:"city"`
 	Country string `bson:"country" json:"country"`
@@ -106,15 +115,14 @@ type mobileExtra struct {
 	BrowsingSuccessRate float64 `json:"browsingSuccessRate"`
 	BrowsingPagesTested int     `json:"browsingPagesTested"`
 	BrowsingScore       float64 `json:"browsingScore"`
-	// Collecte passive de couverture : "active" (test utilisateur) ou
-	// "passive" (relève automatique, sans mesure de débit).
-	Type        string `json:"type"`
-	SignalDbm   int    `json:"signalDbm"`
-	SignalLevel int    `json:"signalLevel"`
+	SignalDbm           int     `json:"signalDbm"`
 	// Mesures radio : absentes (null) hors 4G/5G, d'ou les pointeurs.
-	Rsrp    *int `json:"rsrp"`
-	Rsrq    *int `json:"rsrq"`
-	SimSlot *int `json:"simSlot"`
+	Rsrp          *int   `json:"rsrp"`
+	Rsrq          *int   `json:"rsrq"`
+	SimSlot       *int   `json:"simSlot"`
+	Address       string `json:"address"`
+	DeviceID      string `json:"deviceId"`
+	DataUsedBytes *int64 `json:"dataUsedBytes"`
 }
 
 // ispInfo matches the real shape stored in the isp_info field:
@@ -228,13 +236,23 @@ func Open(uri, dbName string) *MongoDB {
 		{Keys: bson.D{{Key: "operator", Value: 1}}},
 		{Keys: bson.D{{Key: "ip_address", Value: 1}}},
 		{Keys: bson.D{{Key: "network_type", Value: 1}}},
+		{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "timestamp", Value: -1}},
+			Options: options.Index().SetSparse(true)},
 	}
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		log.Warnf("MongoDB index creation warning: %s", err)
 	}
 
+	m := &MongoDB{
+		client:     client,
+		collection: coll,
+		users:      client.Database(dbName).Collection("users"),
+		sessions:   client.Database(dbName).Collection("sessions"),
+	}
+	m.ensureAccountIndexes(ctx)
+
 	log.Infof("Connected to MongoDB Atlas, database: %s", dbName)
-	return &MongoDB{client: client, collection: coll}
+	return m
 }
 
 // ── DataAccess interface ──────────────────────────────────────────────────────
@@ -280,32 +298,9 @@ func (m *MongoDB) FetchLast100() ([]schema.TelemetryData, error) {
 
 // ── Dashboard methods ─────────────────────────────────────────────────────────
 
-// excludePassive écarte les relèves de couverture passives de toute statistique
-// portant sur le débit.
-//
-// Ces relèves n'exécutent aucun speedtest : leurs champs dl/ul/ping valent 0.
-// Sans ce filtre, elles apparaîtraient sur la carte comme des zones à
-// « débit très limité » et tireraient toutes les moyennes vers le bas, alors
-// qu'elles ne mesurent pas le débit du tout.
-//
-// `$ne` retient aussi les documents dépourvus du champ : les enregistrements
-// antérieurs à l'introduction du marqueur restent donc comptés, ce qui est
-// correct puisqu'ils proviennent tous de tests actifs.
-var excludePassive = bson.M{"$ne": "passive"}
-
-// withoutPassive ajoute le filtre ci-dessus à un filtre existant.
-func withoutPassive(filter bson.M) bson.M {
-	if filter == nil {
-		filter = bson.M{}
-	}
-	filter["measurement_type"] = excludePassive
-	return filter
-}
-
 // speedOnly ne retient que les mesures de débit réellement abouties.
 //
-// Écarte, en plus des relèves passives, les tests dont le débit est nul :
-// ce sont des tests qui ont échoué, pas des zones à mauvaise couverture. Les
+// Écarte les tests dont le débit est nul : ce sont des tests qui ont échoué, pas des zones à mauvaise couverture. Les
 // afficher en rouge sur la carte induirait le lecteur en erreur, et les
 // compter dans les moyennes les tirerait artificiellement vers le bas. Ils
 // restent en base et visibles dans l'historique.
@@ -313,7 +308,9 @@ func withoutPassive(filter bson.M) bson.M {
 // La comparaison passe par $expr car `dl` est stocké en texte, sous des formes
 // variables ("0" côté service natif, "0.00" côté application).
 func speedOnly(filter bson.M) bson.M {
-	filter = withoutPassive(filter)
+	if filter == nil {
+		filter = bson.M{}
+	}
 	filter["$expr"] = bson.D{{Key: "$gt", Value: bson.A{toDoubleSafe("$dl"), 0}}}
 	return filter
 }
@@ -322,14 +319,14 @@ func (m *MongoDB) FetchSummary() (*SummaryStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	total, err := m.collection.CountDocuments(ctx, withoutPassive(bson.M{}))
+	total, err := m.collection.CountDocuments(ctx, bson.M{})
 	if err != nil {
 		return nil, err
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
 	testsToday, _ := m.collection.CountDocuments(ctx,
-		withoutPassive(bson.M{"timestamp": bson.M{"$gte": today}}))
+		bson.M{"timestamp": bson.M{"$gte": today}})
 
 	pipeline := mongo.Pipeline{
 		// Moyennes calculées sur les seuls tests de débit aboutis : les tests
@@ -368,7 +365,7 @@ func (m *MongoDB) FetchResults(page, limit int, operator, networkType, from, to 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	filter := withoutPassive(bson.M{})
+	filter := bson.M{}
 	if operator != "" {
 		filter["operator"] = bson.M{"$regex": operator, "$options": "i"}
 	}
@@ -721,16 +718,12 @@ func (m *MongoDB) toDocument(data *schema.TelemetryData) *Document {
 			doc.BrowsingPagesTested = extra.BrowsingPagesTested
 			doc.BrowsingScore = extra.BrowsingScore
 			doc.SignalDbm = extra.SignalDbm
-			doc.SignalLevel = extra.SignalLevel
 			doc.Rsrp = extra.Rsrp
 			doc.Rsrq = extra.Rsrq
 			doc.SimSlot = extra.SimSlot
-			// Un `extra` sans type explicite provient d'une version antérieure
-			// de l'application mobile : c'était nécessairement un test actif.
-			doc.MeasurementType = extra.Type
-			if doc.MeasurementType == "" {
-				doc.MeasurementType = "active"
-			}
+			doc.Address = extra.Address
+			doc.DeviceID = extra.DeviceID
+			doc.DataUsedBytes = extra.DataUsedBytes
 		}
 	}
 

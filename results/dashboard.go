@@ -99,6 +99,34 @@ func DashboardMap(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, points)
 }
 
+// coveragePoint ne porte que ce qu'affiche la carte de l'application mobile.
+type coveragePoint struct {
+	Lat         float64 `json:"lat"`
+	Lng         float64 `json:"lng"`
+	Operator    string  `json:"operator"`
+	NetworkType string  `json:"networkType"`
+	Download    float64 `json:"download"`
+}
+
+// Coverage returns the coverage points shown by the mobile app, without login.
+// GET /api/coverage
+func Coverage(w http.ResponseWriter, r *http.Request) {
+	if !mongoRequired(w) {
+		return
+	}
+	points, err := database.MongoDB.FetchMapPoints()
+	if err != nil {
+		log.Errorf("Coverage error: %s", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	out := make([]coveragePoint, 0, len(points))
+	for _, p := range points {
+		out = append(out, coveragePoint{p.Lat, p.Lng, p.Operator, p.NetworkType, p.Download})
+	}
+	jsonResponse(w, out)
+}
+
 // DashboardTimeline returns daily test counts and average download speed.
 // GET /api/dashboard/timeline?days=30
 func DashboardTimeline(w http.ResponseWriter, r *http.Request) {

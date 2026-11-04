@@ -67,7 +67,7 @@ Vérifier qu'il répond :
 
 ```bash
 curl http://localhost:8989/getIP
-curl http://localhost:8989/api/dashboard/summary
+curl http://localhost:8989/api/coverage
 ```
 
 Compiler un binaire :
@@ -89,6 +89,8 @@ variables d'environnement**, avec le préfixe `SPEEDTEST_`, et ne doivent jamais
 | `SPEEDTEST_IPINFO_API_KEY` | `ipinfo_api_key` | Clé ipinfo.io pour détecter le FAI |
 | `SPEEDTEST_STATISTICS_PASSWORD` | `statistics_password` | Mot de passe de la page `/stats` |
 | `SPEEDTEST_AI_SERVICE_URL` | `ai_service_url` | URL du service IA. **Vide = `/api/ai/*` désactivé** |
+| `SPEEDTEST_DASHBOARD_EMAIL` | `dashboard_email` | Adresse autorisée sur le tableau de bord. **Vide = accès impossible** |
+| `SPEEDTEST_DASHBOARD_PASSWORD` | `dashboard_password` | Mot de passe du tableau de bord. **Vide = accès impossible** |
 
 Réglages non sensibles, dans `settings.toml` :
 
@@ -120,6 +122,14 @@ backend PHP historique de LibreSpeed.
 
 ### API du tableau de bord (spécifique Yélé)
 
+Ces routes et `/api/ai/*` exigent un jeton obtenu par
+`POST /api/dashboard/login {email, password}`, à joindre en en-tête
+`Authorization: Bearer <jeton>`. Il est valable sept jours. Changer l'adresse ou
+le mot de passe invalide tous les jetons déjà émis.
+
+L'application mobile n'a pas ce jeton : sa carte lit `GET /api/coverage`, public,
+qui ne renvoie que la position, l'opérateur, le type de réseau et le débit.
+
 | Route | Renvoie |
 |---|---|
 | `GET /api/dashboard/summary` | KPIs globaux : total, moyennes, tests du jour |
@@ -132,6 +142,39 @@ backend PHP historique de LibreSpeed.
 
 Filtres acceptés par `/results` : `operator`, `network`, `from`, `to` (dates au
 format `YYYY-MM-DD`).
+
+### Baromètre
+
+`GET /api/barometer?network=4G&operator=Orange&download=12.3&upload=4.1&ping=38`
+situe un résultat parmi les mesures abouties des 90 derniers jours, **à type de
+connexion égal** (mobile ou Wi-Fi) : part des mesures dépassées en débit
+descendant, montant et latence, position parmi les clients du même opérateur,
+et débit médian de chaque opérateur ayant au moins 5 mesures. Les variantes
+d'un même nom d'opérateur (« TELECEL FASO », « Telecel Faso »…) sont
+regroupées. Le calcul est gardé en cache 2 minutes.
+
+### Comptes utilisateurs
+
+Facultatifs : une mesure envoyée sans compte reste anonyme.
+
+| Route | Rôle |
+|---|---|
+| `POST /api/auth/register` | Crée un compte `{email, password, name}` et renvoie un jeton |
+| `POST /api/auth/login` | Ouvre une session `{email, password}` et renvoie un jeton |
+| `POST /api/auth/logout` | Révoque le jeton joint |
+| `GET /api/auth/me` | Profil et nombre de mesures du compte |
+| `PUT /api/auth/me` | Modifie le nom ; le mot de passe sur présentation de l'actuel |
+| `DELETE /api/auth/me` | Supprime le compte `{password}` ; ses mesures redeviennent anonymes |
+| `GET /api/auth/results` | Mesures du compte, pour reconstruire l'historique de l'application |
+
+Le jeton se joint en en-tête `Authorization: Bearer <jeton>`, y compris à
+`POST /results/telemetry` pour rattacher la mesure au compte. C'est un jeton
+opaque de 32 octets aléatoires dont seule l'empreinte SHA-256 est stockée
+(collection `sessions`, expiration automatique au bout de six mois). Les mots
+de passe sont hachés avec bcrypt (collection `users`). Inscription et
+connexion sont limitées à 10 tentatives par adresse IP et par quart d'heure.
+Le rattachement d'une mesure (`user_id`) n'est jamais exposé par l'API
+publique du tableau de bord.
 
 ### Proxy vers le service IA
 
@@ -176,19 +219,12 @@ doute, marquer le champ `json:"-"`.
 
 Le corps des requêtes de télémétrie est limité à 64 Kio (`MaxBytesReader`).
 
-### Mesures actives et passives
+### Tests de débit échoués
 
-Depuis l'ajout de la collecte de couverture en arrière-plan, chaque document
-porte un champ `measurement_type` :
-
-- `"active"` — test lancé par l'utilisateur, avec mesure de débit ;
-- `"passive"` — relève automatique de couverture, **sans débit**, avec
-  `signal_dbm` et `signal_level` ;
-- vide — enregistrements antérieurs à ce champ, tous des tests actifs.
-
-Les agrégations écartent les mesures passives via les filtres `withoutPassive()`
-et `speedOnly()`. C'est indispensable : une relève sans débit ferait chuter
-artificiellement toutes les moyennes.
+Un test dont le débit vaut zéro est un test **échoué**, pas une zone sans
+couverture. Les agrégations du tableau de bord (moyennes, carte, opérateurs,
+percentiles) les écartent via le filtre `speedOnly()` ; ils restent en base et
+visibles dans l'historique.
 
 ### Convention « zéro = non mesuré »
 
@@ -211,12 +247,17 @@ web/
 results/
 ├── telemetry.go             Réception des mesures + image PNG
 ├── dashboard.go             Handlers HTTP de l'API tableau de bord
+├── dashboard_auth.go        Connexion au tableau de bord et contrôle du jeton
+├── barometer.go             Baromètre : position d'un résultat
+├── accounts.go              Comptes : inscription, sessions, profil
 ├── stats.go                 Page de statistiques
 └── json.go                  Export JSON
 database/
 ├── database.go              Interface commune
 ├── schema/schema.go         Schéma générique LibreSpeed (12 champs)
-└── mongodb/mongodb.go       *** Cœur Yélé : modèle + agrégations ***
+├── mongodb/mongodb.go       *** Cœur Yélé : modèle + agrégations ***
+├── mongodb/accounts.go      Collections users et sessions
+└── mongodb/barometer.go     Lecture des mesures comparées
 ```
 
 Le fichier à lire en priorité est **`database/mongodb/mongodb.go`** : il contient
@@ -257,8 +298,8 @@ L'instance de démonstration tourne sur Render en offre gratuite, à l'adresse
 > d'attente. Les clients doivent prévoir un délai long et des tentatives
 > successives.
 
-CORS est configuré en `AllowedOrigins: ["*"]` dans `web/web.go`, ce qui convient
-à une API publique en lecture seule.
+CORS est configuré en `AllowedOrigins: ["*"]` dans `web/web.go`. L'accès aux
+données du tableau de bord repose sur le jeton, pas sur l'origine de la requête.
 
 ---
 

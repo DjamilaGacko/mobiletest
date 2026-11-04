@@ -46,7 +46,7 @@ func ListenAndServe(conf *config.Config) error {
 
 	cs := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "OPTIONS", "HEAD"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"},
 		AllowedHeaders: []string{"*"},
 	})
 
@@ -84,14 +84,36 @@ func ListenAndServe(conf *config.Config) error {
 	r.Get(conf.BaseURL+"/results/json", results.JSONResult)
 	r.Get(conf.BaseURL+"/backend/results/json", results.JSONResult)
 
+	// Connexion au tableau de bord.
+	r.Post(conf.BaseURL+"/api/dashboard/login", results.DashboardLogin)
+
+	// Routes réservées au tableau de bord web : API de données et proxy IA.
+	dashboard := r.With(results.RequireDashboard)
+
 	// Dashboard API endpoints
-	r.Get(conf.BaseURL+"/api/dashboard/summary", results.DashboardSummary)
-	r.Get(conf.BaseURL+"/api/dashboard/results", results.DashboardResults)
-	r.Get(conf.BaseURL+"/api/dashboard/operators", results.DashboardOperators)
-	r.Get(conf.BaseURL+"/api/dashboard/map", results.DashboardMap)
-	r.Get(conf.BaseURL+"/api/dashboard/timeline", results.DashboardTimeline)
-	r.Get(conf.BaseURL+"/api/dashboard/heatmap", results.DashboardHeatmap)
-	r.Get(conf.BaseURL+"/api/dashboard/stats/advanced", results.DashboardAdvancedStats)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/summary", results.DashboardSummary)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/results", results.DashboardResults)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/operators", results.DashboardOperators)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/map", results.DashboardMap)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/timeline", results.DashboardTimeline)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/heatmap", results.DashboardHeatmap)
+	dashboard.Get(conf.BaseURL+"/api/dashboard/stats/advanced", results.DashboardAdvancedStats)
+
+	// Carte de couverture de l'application mobile, sans connexion : position,
+	// opérateur, type de réseau et débit uniquement.
+	r.Get(conf.BaseURL+"/api/coverage", results.Coverage)
+
+	// Baromètre : position d'un résultat parmi les autres mesures (IMP-11).
+	r.Get(conf.BaseURL+"/api/barometer", results.Barometer)
+
+	// Comptes utilisateurs (IMP-03).
+	r.Post(conf.BaseURL+"/api/auth/register", results.Register)
+	r.Post(conf.BaseURL+"/api/auth/login", results.Login)
+	r.Post(conf.BaseURL+"/api/auth/logout", results.Logout)
+	r.Get(conf.BaseURL+"/api/auth/me", results.Me)
+	r.Put(conf.BaseURL+"/api/auth/me", results.UpdateMe)
+	r.Delete(conf.BaseURL+"/api/auth/me", results.DeleteMe)
+	r.Get(conf.BaseURL+"/api/auth/results", results.MyResults)
 
 	// Proxy vers le micro-service IA (prédiction + détection d'anomalies).
 	// /api/ai/anomalies -> <ai_service_url>/ai/anomalies
@@ -100,9 +122,11 @@ func ListenAndServe(conf *config.Config) error {
 		if target, err := url.Parse(conf.AIServiceURL); err == nil {
 			proxy := httputil.NewSingleHostReverseProxy(target)
 			apiPrefix := conf.BaseURL + "/api"
-			r.HandleFunc(conf.BaseURL+"/api/ai/*", func(w http.ResponseWriter, req *http.Request) {
+			dashboard.HandleFunc(conf.BaseURL+"/api/ai/*", func(w http.ResponseWriter, req *http.Request) {
 				req.URL.Path = strings.TrimPrefix(req.URL.Path, apiPrefix)
 				req.Host = target.Host
+				// Le jeton du tableau de bord ne concerne pas le service IA.
+				req.Header.Del("Authorization")
 				proxy.ServeHTTP(w, req)
 			})
 			log.Infof("AI service proxied at /api/ai/* -> %s", conf.AIServiceURL)
